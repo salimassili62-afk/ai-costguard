@@ -1,269 +1,134 @@
-# AI Waste Guard
+# AI Execution Firewall
 
-A developer tool that sits between your code and AI APIs (OpenAI, Claude) to **prevent wasted API usage before it happens** — not just track it.
+Stop AI agents from burning money in production.
 
-## 🎯 Core Value
+## The Problem
 
-Detect and **BLOCK inefficient / redundant / expensive AI requests** in real-time, and show you exactly how much money you saved.
+AI agents in production systems can accidentally trigger runaway loops, duplicate requests, and context explosions that burn through API credits in seconds. Traditional monitoring only tells you after the money is gone.
 
-## ✨ Features
+## The Solution
 
-- **Request Interception** - Intercept all outgoing AI API calls (OpenAI, Claude)
-- **Token + Cost Estimation** - Estimate tokens and cost before sending requests
-- **Waste Detection Engine** - Detect repeated prompts, large redundant context, infinite loops
-- **Prevention System** - Block or warn based on configurable waste thresholds
-- **Suggestions Engine** - Get actionable fixes for wasteful patterns
-- **Local Logging** - Track total cost, prevented cost, and blocked requests
-- **CLI Interface** - Simple command-line tool for management
+AI Execution Firewall sits between your code and AI APIs, detecting and blocking dangerous request patterns before they execute. It's a safety layer that prevents cost waste in real-time.
 
-## 📋 Requirements
+## What It Detects
 
-- Node.js 18+ 
-- npm or yarn
+- **Runaway loops**: 5+ identical requests in 30 seconds (kill switch triggered)
+- **Duplicate requests**: Same prompt sent repeatedly within 1 hour
+- **Fuzzy duplicates**: Similar prompts (85%+ similarity) using Levenshtein distance
+- **Context explosions**: Oversized payloads relative to prompt size
+- **Cost spikes**: Single requests exceeding configured limits
+- **Anomalies**: Behavioral deviation from normal usage patterns
 
-## 🚀 Installation
+## Installation
 
 ```bash
-# Clone the repository
-cd ai-waste-guard
-
-# Install dependencies
-npm install
-
-# Build the project
-npm run build
+npm install -g ai-execution-firewall
 ```
 
-## 💻 Usage
+## Quick Start
 
-### Option A: SDK Wrapper (Recommended for direct integration)
+### Option 1: Proxy Mode (Recommended)
+
+```bash
+# Start the firewall proxy
+aifw start --port 3000
+
+# Configure your AI SDK to use the proxy
+# OpenAI example:
+baseURL: 'http://localhost:3000/v1'
+
+# Anthropic example:
+baseURL: 'http://localhost:3000'
+```
+
+### Option 2: SDK Mode
 
 ```typescript
-import { AIWasteGuard } from 'ai-waste-guard';
-import OpenAI from 'openai';
+import { AIExecutionFirewall } from 'ai-execution-firewall';
 
-const guard = new AIWasteGuard();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const firewall = new AIExecutionFirewall();
 
-// Wrap your API calls
-const result = await guard.callOpenAI(
-  async () => {
-    return await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: 'Hello!' }],
-    });
-  },
-  'gpt-3.5-turbo',
-  [{ role: 'user', content: 'Hello!' }]
+// Wrap your AI API calls
+const result = await firewall.call(
+  async () => await openai.chat.completions.create({...}),
+  { model: 'gpt-4', messages: [...] }
 );
 
-if (result.success) {
-  console.log('Response:', result.data);
-} else if (result.blocked) {
+if (result.blocked) {
   console.log('Blocked:', result.reason);
-  console.log('Suggestions:', result.suggestions);
+  console.log('Money saved:', result.savedAmount);
 }
 ```
 
-### Option B: Proxy Server
+### Option 3: CLI Check
 
 ```bash
-# Start the proxy server
-aispend start
-
-# Or with custom port
-aispend start --port 4000
+# Check if a request is safe before sending
+aifw check "your prompt here" --model gpt-4
 ```
 
-Then configure your AI SDK to use the proxy:
-
-```javascript
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL: 'http://localhost:3000/v1', // Point to AI Waste Guard proxy
-});
-```
-
-## 🔧 CLI Commands
+## Configuration
 
 ```bash
-# Start the proxy server
-aispend start
+# Set trust mode (default: warn)
+aifw config --trust-mode warn    # monitor, warn, or block
 
-# View usage and savings report
-aispend report
+# Set maximum cost per request
+aifw config --max-cost 2.0
 
-# View report for specific time period
-aispend report --hours 168  # Last week
-
-# View or update configuration
-aispend config
-
-# Update specific settings
-aispend config --block-mode false
-aispend config --max-cost 0.50
-aispend config --waste-threshold 60
-
-# Reset configuration to defaults
-aispend config --reset
-
-# View recently blocked requests
-aispend blocked
-
-# View last 20 blocked requests
-aispend blocked --number 20
+# Set danger threshold
+aifw config --danger-threshold 60
 ```
 
-## ⚙️ Configuration
+**Trust Modes:**
+- `monitor`: Log everything, allow all requests
+- `warn`: Log warnings, allow requests (default)
+- `block`: Block dangerous requests
 
-Configuration is stored in `~/.ai-waste-guard/config.json`:
-
-```json
-{
-  "blockMode": true,
-  "maxCostPerRequest": 1.0,
-  "wasteThreshold": 50,
-  "allowOverride": true,
-  "proxyPort": 3000,
-  "logRetentionDays": 30
-}
-```
-
-### Settings
-
-- **blockMode** - If true, blocks wasteful requests. If false, only warns.
-- **maxCostPerRequest** - Maximum allowed cost per request (in dollars)
-- **wasteThreshold** - Waste score threshold (0-100) to trigger blocking
-- **allowOverride** - Allow programmatic override of blocks
-- **proxyPort** - Port for the proxy server
-- **logRetentionDays** - How long to keep logs
-
-## 🎯 Waste Detection
-
-The system detects:
-
-1. **Repeated Prompts** - Same prompt sent multiple times within an hour
-2. **Large Redundant Context** - Context much larger than the prompt
-3. **Rapid Repeated Calls** - Multiple identical requests in 30 seconds (possible infinite loop)
-4. **High Cost Requests** - Requests exceeding max cost threshold
-
-### Example Output
-
-```
-🚫 Blocked request: 72% duplicate context detected. Estimated waste: $0.11
-Suggestions:
-- Enable caching for repeated prompts
-- Store AI responses locally
-- Remove duplicate files
-```
-
-## 📊 Reports
-
-View your savings:
+## Commands
 
 ```bash
-$ aispend report
-
-📊 AI Waste Guard Report
-
-Last 24 hours
-
-Total Requests: 150
-Blocked Requests: 18
-Total Cost: $0.4523
-Prevented Cost: $0.1123
-Total Tokens: 45,230
-
-💰 You saved $0.1123 by blocking 18 wasteful requests!
+aifw check <prompt>      # Check if a request is safe
+aifw start                # Start the firewall proxy
+aifw report               # View protection statistics
+aifw config               # Configure firewall settings
+aifw blocked              # View blocked requests log
 ```
 
-## 🧪 Demo
+## Supported Models
 
-Run the demo to see AI Waste Guard in action:
+**OpenAI:**
+- gpt-4, gpt-4-32k, gpt-4-turbo, gpt-4-turbo-preview, gpt-4o, gpt-4o-mini, gpt-3.5-turbo, gpt-3.5-turbo-16k
 
-```bash
-npm run test
-```
+**Anthropic:**
+- claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
+- claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
+- claude-2.1, claude-2, claude-instant-1.2
 
-This will simulate various scenarios including:
-- Normal requests (allowed)
-- Duplicate requests (blocked)
-- Large context detection (warned)
-- Override functionality
+## How It Works
 
-## 📁 Project Structure
+1. **Request Interception**: Firewall intercepts AI API requests
+2. **Pattern Analysis**: Analyzes request against detection rules
+3. **Risk Scoring**: Calculates danger score (0-100) based on patterns
+4. **Action Decision**: Blocks, warns, or allows based on trust mode
+5. **Logging**: Records all requests with cost estimates for analytics
 
-```
-ai-waste-guard/
-├── src/
-│   ├── config/           # Pricing and user configuration
-│   ├── token-counter/    # Token estimation
-│   ├── waste-detection/  # Waste detection engine
-│   ├── logger/           # SQLite logging
-│   ├── proxy/            # Proxy server
-│   ├── wrapper/          # SDK wrapper
-│   ├── cli/              # CLI interface
-│   └── examples/         # Usage examples
-├── examples/             # Additional examples
-├── package.json
-├── tsconfig.json
-└── README.md
-```
+## Kill Switch
 
-## 🔒 Privacy
+Critical patterns (runaway loops, extreme cost spikes) trigger the kill switch, instantly blocking requests regardless of trust mode. This prevents catastrophic cost spikes.
 
-- **Local-first** - All data stored locally in `~/.ai-waste-guard/`
-- **No remote tracking** - No data sent to external servers
-- **No API keys stored** - Your API keys stay with your application
+## Security
 
-## 🛠️ Development
+- **API Key Authentication**: Proxy supports optional API key via `x-firewall-api-key` header
+- **Rate Limiting**: Configurable per-IP rate limiting (default: 60 requests/minute)
+- **No Sensitive Data Logging**: Only prompt hashes (SHA-256) are stored, never raw prompts
+- **Local Storage Only**: All data stored locally in `~/.ai-execution-firewall/`
+- **No External Calls**: No telemetry or data sent to external servers
 
-```bash
-# Install dependencies
-npm install
+## Privacy
 
-# Build
-npm run build
+All data stored locally in `~/.ai-execution-firewall/`. No data sent to external servers.
 
-# Run in development mode
-npm run dev
-
-# Run demo
-npm run test
-```
-
-## 📝 Supported Models
-
-### OpenAI
-- GPT-4, GPT-4 Turbo, GPT-4 32K
-- GPT-3.5 Turbo, GPT-3.5 Turbo 16K, GPT-3.5 Turbo Instruct
-
-### Anthropic Claude
-- Claude 3 Opus, Sonnet, Haiku
-- Claude 2.1, Claude 2
-- Claude Instant 1.2
-
-## 🤝 Contributing
-
-Contributions welcome! Please feel free to submit issues or pull requests.
-
-## 📄 License
+## License
 
 MIT
-
-## 🙋 FAQ
-
-**Q: Does this modify my API responses?**
-A: No, it only analyzes requests before they're sent. Responses are returned unchanged.
-
-**Q: Can I bypass the block for specific requests?**
-A: Yes, use the `overrideBlock: true` option in the SDK wrapper.
-
-**Q: How accurate is the token estimation?**
-A: It uses a character-based approximation (~4 chars per token). For production use, consider integrating tiktoken for more accuracy.
-
-**Q: What happens if the proxy server crashes?**
-A: Your application will receive an error. We recommend implementing fallback logic in your application.
-
-**Q: Can I use this with other AI providers?**
-A: Currently supports OpenAI and Anthropic. Additional providers can be added by extending the proxy server.

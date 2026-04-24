@@ -1,232 +1,473 @@
 import { createHash } from 'crypto';
+import { HistoryStorage, RequestRecord } from '../storage/historyStorage';
+import { TrustMode } from '../config';
 
-export interface WasteDetectionResult {
-  isWasteful: boolean;
-  wasteScore: number; // 0-100
+export interface DetectionResult {
+  isDangerous: boolean;
+  dangerScore: number; // 0-100
   reason: string;
   suggestions: string[];
-  estimatedWaste: number; // in dollars
+  estimatedLoss: number; // in dollars
+  severity: 'SAFE' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  category: 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'anomaly';
+  killSwitchTriggered: boolean;
 }
 
-export interface RequestHistory {
-  hash: string;
-  timestamp: number;
-  model: string;
-  cost: number;
-}
-
+/**
+ * AI Execution Firewall - Advanced Danger Detection Engine
+ * Uses fingerprinting, behavioral analysis, fuzzy similarity, and time-window tracking
+ */
 export class WasteDetector {
-  private requestHistory: Map<string, RequestHistory[]> = new Map();
-  private recentRequests: RequestHistory[] = [];
-  private readonly HISTORY_WINDOW = 3600000; // 1 hour in ms
+  private history: HistoryStorage;
   private readonly RAPID_REQUEST_THRESHOLD = 5; // requests within 30 seconds
   private readonly RAPID_REQUEST_WINDOW = 30000; // 30 seconds
+  private readonly ANOMALY_DEVIATION_THRESHOLD = 3; // 3x standard deviation
+  private readonly KILL_SWITCH_THRESHOLD = 90; // danger score that triggers kill switch
+  private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
+    this.history = new HistoryStorage();
     // Clean up old history periodically
-    setInterval(() => this.cleanupHistory(), 60000) as unknown as NodeJS.Timeout;
+    this.cleanupInterval = setInterval(() => {
+      // Trigger cleanup via public method
+      const now = Date.now();
+      const cutoff = now - 86400000; // 24 hours
+      this.history.getRecordsInWindow(86400000); // This triggers internal cleanup
+    }, 60000) as unknown as NodeJS.Timeout;
   }
 
   /**
-   * Detect if a request is wasteful
+   * Cleanup method to prevent memory leaks
    */
-  detectWaste(
+  destroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this.history.destroy();
+  }
+
+  /**
+   * Detect if a request is dangerous using behavioral analysis
+   * Priority: Loop > Duplicate > Fuzzy Duplicate > Context > Spike > Anomaly
+   */
+  detect(
     model: string,
     prompt: string,
     estimatedCost: number,
-    context?: string
-  ): WasteDetectionResult {
-    const hash = this.hashRequest(prompt, context);
+    context?: string,
+    trustMode: TrustMode = 'warn',
+    override: boolean = false
+  ): DetectionResult & { action: 'allow' | 'warn' | 'block' } {
+    // Input validation
+    if (!prompt || typeof prompt !== 'string') {
+      return {
+        isDangerous: true,
+        dangerScore: 100,
+        severity: 'CRITICAL',
+        reason: 'Invalid prompt: must be a non-empty string',
+        suggestions: ['Provide a valid prompt string'],
+        killSwitchTriggered: true,
+        estimatedLoss: 0,
+        category: 'anomaly',
+        action: 'block',
+      };
+    }
+
+    if (typeof estimatedCost !== 'number' || estimatedCost < 0) {
+      return {
+        isDangerous: true,
+        dangerScore: 100,
+        severity: 'CRITICAL',
+        reason: 'Invalid cost: must be a non-negative number',
+        suggestions: ['Provide a valid cost estimate'],
+        killSwitchTriggered: true,
+        estimatedLoss: 0,
+        category: 'anomaly',
+        action: 'block',
+      };
+    }
+
+    const hash = this.fingerprint(prompt, context);
     const now = Date.now();
 
-    // Check for repeated prompts
-    const duplicateResult = this.checkDuplicates(hash, model, estimatedCost, now);
-    if (duplicateResult.isWasteful) {
-      return duplicateResult;
+    // Check 1: Runaway loop (CRITICAL - KILL SWITCH)
+    const loopResult = this.detectLoop(hash, now, estimatedCost);
+    if (loopResult.isDangerous) {
+      this.recordRequest(hash, model, prompt, estimatedCost, context, loopResult, trustMode, override);
+      const result = { ...loopResult, action: this.determineAction(loopResult, trustMode, override) };
+      // Kill switch: always block loops regardless of trust mode
+      if (loopResult.dangerScore >= this.KILL_SWITCH_THRESHOLD) {
+        result.action = 'block';
+        result.killSwitchTriggered = true;
+      }
+      return result;
     }
 
-    // Check for rapid repeated calls
-    const rapidCallResult = this.checkRapidCalls(hash, now, estimatedCost);
-    if (rapidCallResult.isWasteful) {
-      return rapidCallResult;
+    // Check 2: Exact duplicate detection
+    const duplicateResult = this.detectDuplicate(hash, model, estimatedCost, now);
+    if (duplicateResult.isDangerous) {
+      this.recordRequest(hash, model, prompt, estimatedCost, context, duplicateResult, trustMode, override);
+      const result = { ...duplicateResult, action: this.determineAction(duplicateResult, trustMode, override) };
+      return result;
     }
 
-    // Check for large redundant context
-    if (context) {
-      const contextResult = this.checkRedundantContext(prompt, context, estimatedCost);
-      if (contextResult.isWasteful) {
-        return contextResult;
+    // Check 3: Fuzzy duplicate detection (similar but not identical)
+    const fuzzyResult = this.detectFuzzyDuplicate(prompt, model, estimatedCost, now);
+    if (fuzzyResult.isDangerous) {
+      this.recordRequest(hash, model, prompt, estimatedCost, context, fuzzyResult, trustMode, override);
+      const result = { ...fuzzyResult, action: this.determineAction(fuzzyResult, trustMode, override) };
+      return result;
+    }
+
+    // Check 4: Context explosion
+    if (context && prompt) {
+      const contextResult = this.detectContextExplosion(prompt, context, estimatedCost);
+      if (contextResult.isDangerous) {
+        this.recordRequest(hash, model, prompt, estimatedCost, context, contextResult, trustMode, override);
+        return { ...contextResult, action: this.determineAction(contextResult, trustMode, override) };
       }
     }
 
+    // Check 5: Cost spike
+    const spikeResult = this.detectCostSpike(estimatedCost);
+    if (spikeResult.isDangerous) {
+      this.recordRequest(hash, model, prompt, estimatedCost, context, spikeResult, trustMode, override);
+      const result = { ...spikeResult, action: this.determineAction(spikeResult, trustMode, override) };
+      // Kill switch for extreme cost spikes
+      if (spikeResult.dangerScore >= this.KILL_SWITCH_THRESHOLD) {
+        result.action = 'block';
+        result.killSwitchTriggered = true;
+      }
+      return result;
+    }
+
+    // Check 6: Anomaly detection (behavioral deviation)
+    const anomalyResult = this.detectAnomaly(hash, estimatedCost, now);
+    if (anomalyResult.isDangerous) {
+      this.recordRequest(hash, model, prompt, estimatedCost, context, anomalyResult, trustMode, override);
+      return { ...anomalyResult, action: this.determineAction(anomalyResult, trustMode, override) };
+    }
+
+    // Safe request
+    this.recordRequest(hash, model, prompt, estimatedCost, context, null, trustMode, override);
     return {
-      isWasteful: false,
-      wasteScore: 0,
-      reason: '',
+      isDangerous: false,
+      dangerScore: 0,
+      severity: 'SAFE',
+      reason: 'Request is safe',
       suggestions: [],
-      estimatedWaste: 0,
+      estimatedLoss: 0,
+      category: 'anomaly',
+      killSwitchTriggered: false,
+      action: 'allow',
     };
   }
 
-  private hashRequest(prompt: string, context?: string): string {
-    const data = context ? `${prompt}::${context}` : prompt;
-    return createHash('sha256').update(data).digest('hex');
+  private determineAction(result: DetectionResult, trustMode: TrustMode, override: boolean): 'allow' | 'warn' | 'block' {
+    if (override) return 'allow';
+    if (result.killSwitchTriggered) return 'block'; // Kill switch overrides trust mode
+    if (trustMode === 'monitor') return 'allow';
+    if (trustMode === 'warn') return 'warn';
+    if (trustMode === 'block') return 'block';
+    return 'allow';
   }
 
-  private checkDuplicates(
-    hash: string,
-    model: string,
-    estimatedCost: number,
-    now: number
-  ): WasteDetectionResult {
-    const history = this.requestHistory.get(hash) || [];
-    const recent = history.filter(h => now - h.timestamp < this.HISTORY_WINDOW);
-
-    if (recent.length > 0) {
-      const wasteScore = Math.min(90, recent.length * 30);
-      return {
-        isWasteful: true,
-        wasteScore,
-        reason: `Duplicate request detected. This prompt has been sent ${recent.length} time(s) in the last hour.`,
-        suggestions: [
-          'Enable caching for repeated prompts',
-          'Store AI responses locally',
-          'Use prompt templates to avoid repetition',
-        ],
-        estimatedWaste: estimatedCost * recent.length,
-      };
-    }
-
-    return { isWasteful: false, wasteScore: 0, reason: '', suggestions: [], estimatedWaste: 0 };
-  }
-
-  private checkRapidCalls(
-    hash: string,
-    now: number,
-    estimatedCost: number
-  ): WasteDetectionResult {
-    const recent = this.recentRequests.filter(
-      r => r.hash === hash && now - r.timestamp < this.RAPID_REQUEST_WINDOW
-    );
+  /**
+   * Detect runaway loops (same request repeated rapidly)
+   */
+  private detectLoop(hash: string, now: number, estimatedCost: number): DetectionResult {
+    const recent = this.history.getRecentRecords(hash, this.RAPID_REQUEST_WINDOW);
 
     if (recent.length >= this.RAPID_REQUEST_THRESHOLD) {
+      const totalLoss = estimatedCost * recent.length;
+      // Adaptive threshold: more aggressive with higher counts
+      const adaptiveScore = Math.min(100, 80 + (recent.length - this.RAPID_REQUEST_THRESHOLD) * 5);
+
       return {
-        isWasteful: true,
-        wasteScore: 85,
-        reason: `Rapid repeated calls detected. ${recent.length} identical requests in 30 seconds - possible infinite loop.`,
+        isDangerous: true,
+        dangerScore: adaptiveScore,
+        severity: 'CRITICAL',
+        category: 'loop',
+        reason: `🔴 KILL SWITCH: RUNAWAY LOOP DETECTED - ${recent.length} identical requests in 30 seconds`,
         suggestions: [
-          'Check for infinite loops in your code',
-          'Add rate limiting',
-          'Implement request deduplication',
+          '🚨 STOP: Check your code for infinite loops or recursive agent calls',
+          'Add break condition to your loop',
+          'Verify retry logic is not stuck'
         ],
-        estimatedWaste: estimatedCost * recent.length,
+        estimatedLoss: totalLoss,
+        killSwitchTriggered: true,
       };
     }
 
-    return { isWasteful: false, wasteScore: 0, reason: '', suggestions: [], estimatedWaste: 0 };
+    return { isDangerous: false, dangerScore: 0, severity: 'SAFE', reason: '', suggestions: [], estimatedLoss: 0, category: 'loop', killSwitchTriggered: false };
   }
 
-  private checkRedundantContext(
-    prompt: string,
-    context: string,
-    estimatedCost: number
-  ): WasteDetectionResult {
-    const promptHash = this.hashRequest(prompt);
-    const contextHash = this.hashRequest(context);
+  /**
+   * Detect duplicate requests (same hash within time window)
+   */
+  private detectDuplicate(hash: string, model: string, estimatedCost: number, now: number): DetectionResult {
+    const recent = this.history.getRecentRecords(hash, 3600000); // 1 hour
 
-    // Check if context is much larger than prompt (possible inefficiency)
-    const contextRatio = context.length / (prompt.length || 1);
-    if (contextRatio > 10) {
-      const wastePercent = Math.min(50, contextRatio * 2);
+    if (recent.length > 0) {
+      const duplicateCount = recent.length;
+      const totalLoss = estimatedCost * duplicateCount;
+
+      const severity = duplicateCount > 5 ? 'CRITICAL' : duplicateCount > 2 ? 'HIGH' : 'MEDIUM';
+
       return {
-        isWasteful: true,
-        wasteScore: wastePercent,
-        reason: `Large context detected. Context is ${contextRatio.toFixed(1)}x larger than prompt.`,
+        isDangerous: true,
+        dangerScore: Math.min(90, 40 + duplicateCount * 10),
+        severity,
+        category: 'duplicate',
+        reason: `💸 DUPLICATE: This exact prompt was sent ${duplicateCount} time(s) in the last hour`,
         suggestions: [
-          'Remove unnecessary files from context',
-          'Summarize context before sending',
-          'Use RAG to retrieve only relevant information',
+          `Cache this prompt result to avoid ${duplicateCount} redundant calls`,
+          'Use a result cache with 1-hour TTL',
+          'Check for retry logic causing duplicates'
         ],
-        estimatedWaste: estimatedCost * (wastePercent / 100),
+        estimatedLoss: totalLoss,
+        killSwitchTriggered: false,
       };
     }
 
-    // Check for similarity with recent contexts
-    const recentContexts = this.recentRequests
-      .filter(r => Date.now() - r.timestamp < this.HISTORY_WINDOW)
-      .slice(-10);
+    return { isDangerous: false, dangerScore: 0, severity: 'SAFE', reason: '', suggestions: [], estimatedLoss: 0, category: 'duplicate', killSwitchTriggered: false };
+  }
 
-    for (const recent of recentContexts) {
-      const similarity = this.calculateSimilarity(context, context);
-      if (similarity > 0.8) {
+  /**
+   * Detect fuzzy duplicates (similar but not identical prompts)
+   */
+  private detectFuzzyDuplicate(prompt: string, model: string, estimatedCost: number, now: number): DetectionResult {
+    const recentRecords = this.history.getRecordsInWindow(3600000); // 1 hour
+    const SIMILARITY_THRESHOLD = 0.85; // 85% similarity threshold
+
+    for (const record of recentRecords) {
+      const similarity = this.calculateSimilarity(prompt, record.prompt);
+      if (similarity >= SIMILARITY_THRESHOLD) {
+        const totalLoss = estimatedCost * (recentRecords.length + 1) / 2; // Estimate
+        
         return {
-          isWasteful: true,
-          wasteScore: 60,
-          reason: `Highly similar context (${Math.round(similarity * 100)}% overlap) with recent request.`,
+          isDangerous: true,
+          dangerScore: Math.min(70, 30 + similarity * 40),
+          severity: 'MEDIUM',
+          category: 'fuzzy_duplicate',
+          reason: `⚠️ SIMILAR PROMPT: ${(similarity * 100).toFixed(0)}% similar to a recent request`,
           suggestions: [
-            'Cache context between requests',
-            'Use incremental updates instead of full context',
-            'Implement context diffing',
+            'Consider if this variation is necessary',
+            'Use a cache key that handles similar requests',
+            'Review prompt generation logic'
           ],
-          estimatedWaste: estimatedCost * 0.5,
+          estimatedLoss: totalLoss * 0.5, // Conservative estimate
+          killSwitchTriggered: false,
         };
       }
     }
 
-    return { isWasteful: false, wasteScore: 0, reason: '', suggestions: [], estimatedWaste: 0 };
+    return { isDangerous: false, dangerScore: 0, severity: 'SAFE', reason: '', suggestions: [], estimatedLoss: 0, category: 'fuzzy_duplicate', killSwitchTriggered: false };
   }
 
+  /**
+   * Calculate similarity between two strings using Levenshtein distance
+   */
   private calculateSimilarity(str1: string, str2: string): number {
-    // Simple similarity check using word overlap
-    const words1 = new Set(str1.toLowerCase().split(/\s+/));
-    const words2 = new Set(str2.toLowerCase().split(/\s+/));
-    
-    const intersection = new Set([...words1].filter(x => words2.has(x)));
-    const union = new Set([...words1, ...words2]);
-    
-    return union.size === 0 ? 0 : intersection.size / union.size;
-  }
+    if (!str1 || !str2) return 0;
+    if (str1 === str2) return 1;
 
-  recordRequest(hash: string, model: string, cost: number): void {
-    const now = Date.now();
-    const record: RequestHistory = { hash, timestamp: now, model, cost };
+    const len1 = Math.min(str1.length, 500); // Limit for performance
+    const len2 = Math.min(str2.length, 500);
+    const s1 = str1.substring(0, len1);
+    const s2 = str2.substring(0, len2);
 
-    // Add to hash-specific history
-    if (!this.requestHistory.has(hash)) {
-      this.requestHistory.set(hash, []);
+    const matrix: number[][] = [];
+    for (let i = 0; i <= len1; i++) {
+      matrix[i] = [i];
     }
-    this.requestHistory.get(hash)!.push(record);
-
-    // Add to recent requests
-    this.recentRequests.push(record);
-
-    // Keep recent requests manageable
-    if (this.recentRequests.length > 1000) {
-      this.recentRequests = this.recentRequests.slice(-500);
+    for (let j = 0; j <= len2; j++) {
+      matrix[0][j] = j;
     }
-  }
 
-  private cleanupHistory(): void {
-    const now = Date.now();
-    
-    for (const [hash, history] of this.requestHistory.entries()) {
-      const filtered = history.filter(h => now - h.timestamp < this.HISTORY_WINDOW);
-      if (filtered.length === 0) {
-        this.requestHistory.delete(hash);
-      } else {
-        this.requestHistory.set(hash, filtered);
+    for (let i = 1; i <= len1; i++) {
+      for (let j = 1; j <= len2; j++) {
+        const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost
+        );
       }
     }
 
-    this.recentRequests = this.recentRequests.filter(
-      r => now - r.timestamp < this.HISTORY_WINDOW
-    );
+    const distance = matrix[len1][len2];
+    const maxLength = Math.max(len1, len2);
+    return 1 - distance / maxLength;
   }
 
-  getStats() {
-    return {
-      uniqueRequests: this.requestHistory.size,
-      totalRecentRequests: this.recentRequests.length,
+  /**
+   * Detect context explosion (oversized context relative to prompt)
+   */
+  private detectContextExplosion(prompt: string, context: string, estimatedCost: number): DetectionResult {
+    const promptLength = prompt.length;
+    const contextLength = context.length;
+    const contextRatio = contextLength / (promptLength || 1);
+    const contextPercentage = (contextLength / (promptLength + contextLength)) * 100;
+
+    if (contextRatio > 20) {
+      const wastePercentage = Math.min(55, Math.log(contextRatio) * 15);
+      const estimatedLoss = estimatedCost * (wastePercentage / 100);
+
+      return {
+        isDangerous: true,
+        dangerScore: Math.min(75, 30 + wastePercentage),
+        severity: contextRatio > 50 ? 'HIGH' : 'MEDIUM',
+        category: 'context',
+        reason: `💸 CONTEXT EXPLOSION: Context is ${contextRatio.toFixed(1)}x larger than prompt (${contextPercentage.toFixed(0)}% of total)`,
+        suggestions: [
+          `Trim context from ${Math.round(contextLength / 1024)}KB to < ${Math.round(contextLength / 1024 / 5)}KB`,
+          'Extract only relevant sections',
+          'Use RAG to retrieve smaller relevant chunks'
+        ],
+        estimatedLoss,
+        killSwitchTriggered: false,
+      };
+    }
+
+    if (contextRatio > 5) {
+      const wastePercentage = Math.log(contextRatio) * 8;
+      const estimatedLoss = estimatedCost * (wastePercentage / 100);
+
+      return {
+        isDangerous: true,
+        dangerScore: Math.min(65, 20 + wastePercentage),
+        severity: 'MEDIUM',
+        category: 'context',
+        reason: `⚠️ ABNORMAL CONTEXT SIZE: Context is ${contextRatio.toFixed(1)}x larger than prompt`,
+        suggestions: [
+          'Reduce context size by removing redundant information',
+          'Summarize context before sending',
+          'Use embedding-based retrieval for efficiency'
+        ],
+        estimatedLoss,
+        killSwitchTriggered: false,
+      };
+    }
+
+    return { isDangerous: false, dangerScore: 0, severity: 'SAFE', reason: '', suggestions: [], estimatedLoss: 0, category: 'context', killSwitchTriggered: false };
+  }
+
+  /**
+   * Detect cost spikes (single expensive request)
+   */
+  private detectCostSpike(estimatedCost: number): DetectionResult {
+    if (estimatedCost > 1.0) {
+      const dangerScore = Math.min(100, 30 + (estimatedCost - 1.0) * 20);
+      const isKillSwitch = dangerScore >= this.KILL_SWITCH_THRESHOLD;
+
+      return {
+        isDangerous: true,
+        dangerScore,
+        severity: estimatedCost > 5 ? 'CRITICAL' : 'HIGH',
+        category: 'spike',
+        reason: isKillSwitch ? `🔴 KILL SWITCH: EXTREME COST - $${estimatedCost.toFixed(2)}` : `💸 COST SPIKE: Single request costs $${estimatedCost.toFixed(2)}`,
+        suggestions: [
+          'Consider if this really needs to be done now',
+          'Use a cheaper model (gpt-4o-mini, claude-haiku)',
+          'Break into multiple smaller requests'
+        ],
+        estimatedLoss: estimatedCost * 0.5,
+        killSwitchTriggered: isKillSwitch,
+      };
+    }
+
+    return { isDangerous: false, dangerScore: 0, severity: 'SAFE', reason: '', suggestions: [], estimatedLoss: 0, category: 'spike', killSwitchTriggered: false };
+  }
+
+  /**
+   * Detect anomalies (behavioral deviation from normal usage)
+   */
+  private detectAnomaly(hash: string, estimatedCost: number, now: number): DetectionResult {
+    const recentRecords = this.history.getRecordsInWindow(3600000); // 1 hour
+    
+    if (recentRecords.length < 10) {
+      // Not enough data for anomaly detection
+      return { isDangerous: false, dangerScore: 0, severity: 'SAFE', reason: '', suggestions: [], estimatedLoss: 0, category: 'anomaly', killSwitchTriggered: false };
+    }
+
+    const costs = recentRecords.map(r => r.estimatedCost);
+    const mean = costs.reduce((a, b) => a + b, 0) / costs.length;
+    const variance = costs.reduce((sum, cost) => sum + Math.pow(cost - mean, 2), 0) / costs.length;
+    const stdDev = Math.sqrt(variance);
+
+    if (stdDev > 0 && estimatedCost > mean + this.ANOMALY_DEVIATION_THRESHOLD * stdDev) {
+      const deviation = ((estimatedCost - mean) / stdDev).toFixed(1);
+
+      return {
+        isDangerous: true,
+        dangerScore: Math.min(60, 30 + parseFloat(deviation) * 5),
+        severity: 'MEDIUM',
+        category: 'anomaly',
+        reason: `⚠️ ANOMALY: Cost is ${deviation}x standard deviation above normal`,
+        suggestions: [
+          'Review if this request pattern is expected',
+          'Check for unusual data being processed',
+          'Monitor for similar requests'
+        ],
+        estimatedLoss: estimatedCost - mean,
+        killSwitchTriggered: false,
+      };
+    }
+
+    return { isDangerous: false, dangerScore: 0, severity: 'SAFE', reason: '', suggestions: [], estimatedLoss: 0, category: 'anomaly', killSwitchTriggered: false };
+  }
+
+  /**
+   * Record request to history
+   */
+  private recordRequest(
+    hash: string,
+    model: string,
+    prompt: string,
+    estimatedCost: number,
+    context: string | undefined,
+    detectionResult: DetectionResult | null,
+    trustMode: TrustMode,
+    override: boolean
+  ): void {
+    const record: RequestRecord = {
+      id: `${hash}-${Date.now()}`,
+      hash,
+      model,
+      prompt,
+      context,
+      estimatedCost,
+      timestamp: Date.now(),
+      wasBlocked: Boolean(detectionResult?.isDangerous && (trustMode === 'block' || detectionResult.killSwitchTriggered) && !override),
+      wasWarned: Boolean(detectionResult?.isDangerous && trustMode === 'warn' && !detectionResult.killSwitchTriggered && !override),
+      dangerScore: detectionResult?.dangerScore || 0,
+      reason: detectionResult?.reason,
     };
+
+    this.history.addRecord(record);
+  }
+
+  /**
+   * Create request fingerprint (hash of prompt + context)
+   */
+  private fingerprint(prompt: string, context?: string): string {
+    const data = context ? `${prompt}::${context}` : prompt;
+    return createHash('sha256').update(data).digest('hex').substring(0, 12);
+  }
+
+  /**
+   * Get statistics
+   */
+  getStats(hours: number = 24) {
+    return this.history.getStats(hours);
+  }
+
+  /**
+   * Get blocked requests
+   */
+  getBlockedRequests(limit: number = 10) {
+    return this.history.getBlockedRequests(limit);
   }
 }

@@ -5,6 +5,8 @@ import { Logger, LogEntry } from '../logger';
 import { estimateTokens, estimateMessagesTokens } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
 import { ConfigManager } from '../config';
+import { createHash, randomUUID } from 'crypto';
+import { formatAlert } from '../utils/alert';
 
 export class ProxyServer {
   private app: express.Application;
@@ -12,6 +14,7 @@ export class ProxyServer {
   private logger: Logger;
   private config: ConfigManager;
   private port: number;
+  private server: any;
 
   constructor(port?: number) {
     this.app = express();
@@ -25,7 +28,42 @@ export class ProxyServer {
   }
 
   private setupMiddleware(): void {
-    this.app.use(express.json());
+    this.app.use(express.json({ limit: '10mb' }));
+    
+    // Rate limiting middleware
+    const rateLimitMap = new Map<string, number[]>();
+    this.app.use((req, res, next) => {
+      const clientIp = req.ip || 'unknown';
+      const now = Date.now();
+      const oneMinuteAgo = now - 60000;
+      
+      const requests = rateLimitMap.get(clientIp) || [];
+      const recentRequests = requests.filter(t => t > oneMinuteAgo);
+      
+      if (recentRequests.length >= this.config.rateLimitPerMinute) {
+        res.status(429).json({ error: 'Too many requests', retryAfter: 60 });
+        return;
+      }
+      
+      recentRequests.push(now);
+      rateLimitMap.set(clientIp, recentRequests);
+      next();
+    });
+    
+    // API key protection middleware
+    this.app.use((req, res, next) => {
+      const configuredApiKey = this.config.apiKey;
+      const requestApiKey = req.headers['x-firewall-api-key'] as string;
+      
+      if (configuredApiKey && requestApiKey !== configuredApiKey) {
+        res.status(401).json({ error: 'Unauthorized: Invalid firewall API key' });
+        return;
+      }
+      
+      next();
+    });
+    
+    // Request logging
     this.app.use((req, res, next) => {
       console.log(`${req.method} ${req.path}`);
       next();
@@ -33,14 +71,14 @@ export class ProxyServer {
   }
 
   private setupRoutes(): void {
-    // OpenAI proxy endpoint
-    this.app.all('/v1/*', async (req: Request, res: Response) => {
-      await this.handleOpenAIRequest(req, res);
-    });
-
-    // Anthropic proxy endpoint
+    // Anthropic proxy endpoint (MUST be first - more specific)
     this.app.all('/v1/messages', async (req: Request, res: Response) => {
       await this.handleAnthropicRequest(req, res);
+    });
+
+    // OpenAI proxy endpoint (catches everything else under /v1/)
+    this.app.all('/v1/*', async (req: Request, res: Response) => {
+      await this.handleOpenAIRequest(req, res);
     });
 
     // Health check
@@ -69,27 +107,56 @@ export class ProxyServer {
       // Check cost limit
       if (estimatedCost > this.config.maxCostPerRequest) {
         const message = `Request blocked: Estimated cost $${estimatedCost.toFixed(4)} exceeds maximum $${this.config.maxCostPerRequest.toFixed(2)}`;
-        this.logRequest(model, inputTokens, 0, estimatedCost, true, 100, message, prompt);
+        this.logRequest(model, inputTokens, 0, estimatedCost, true, 100, message, prompt, {
+          category: 'spike',
+          severity: 'CRITICAL',
+          action: 'block',
+          killSwitchTriggered: true,
+        });
         res.status(403).json({ error: message, blocked: true });
         return;
       }
 
-      // Detect waste
-      const wasteResult = this.wasteDetector.detectWaste(model, prompt, estimatedCost);
+      // Detect danger
+      const detectionResult = this.wasteDetector.detect(
+        model,
+        prompt,
+        estimatedCost,
+        undefined,
+        this.config.trustMode,
+        false
+      );
       
-      if (wasteResult.isWasteful && wasteResult.wasteScore >= this.config.wasteThreshold) {
-        if (this.config.blockMode) {
-          const message = `Blocked request: ${wasteResult.reason}. Estimated waste: $${wasteResult.estimatedWaste.toFixed(4)}`;
-          this.logRequest(model, inputTokens, 0, estimatedCost, true, wasteResult.wasteScore, wasteResult.reason, prompt);
+      if (detectionResult.isDangerous && detectionResult.dangerScore >= this.config.dangerThreshold) {
+        const message = detectionResult.killSwitchTriggered 
+          ? `🔴 KILL SWITCH: ${detectionResult.reason}. 💸 Prevented: $${detectionResult.estimatedLoss.toFixed(4)}`
+          : `Blocked request: ${detectionResult.reason}. Estimated loss: $${detectionResult.estimatedLoss.toFixed(4)}`;
+        
+        this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, prompt, {
+          category: detectionResult.category,
+          severity: detectionResult.severity,
+          action: detectionResult.action,
+          killSwitchTriggered: detectionResult.killSwitchTriggered,
+        });
+        
+        if (detectionResult.action === 'block') {
           res.status(403).json({ 
             error: message, 
             blocked: true,
-            wasteScore: wasteResult.wasteScore,
-            suggestions: wasteResult.suggestions
+            dangerScore: detectionResult.dangerScore,
+            killSwitchTriggered: detectionResult.killSwitchTriggered,
+            suggestions: detectionResult.suggestions
           });
           return;
         } else {
-          console.warn(`Warning: ${wasteResult.reason}`);
+          const alert = formatAlert({
+            severity: detectionResult.severity,
+            category: detectionResult.category,
+            reason: detectionResult.reason,
+            estimatedLoss: detectionResult.estimatedLoss,
+            suggestions: detectionResult.suggestions,
+          });
+          if (alert) console.log(alert);
         }
       }
 
@@ -97,7 +164,12 @@ export class ProxyServer {
       await this.forwardRequest(req, res, 'https://api.openai.com');
       
       // Log successful request
-      this.logRequest(model, inputTokens, 0, estimatedCost, false, wasteResult.wasteScore, '', prompt);
+      this.logRequest(model, inputTokens, 0, estimatedCost, false, detectionResult.dangerScore, '', prompt, {
+        category: 'safe',
+        severity: 'SAFE',
+        action: 'allow',
+        killSwitchTriggered: false,
+      });
 
     } catch (error) {
       console.error('Error handling OpenAI request:', error);
@@ -109,10 +181,11 @@ export class ProxyServer {
     try {
       const model = req.body?.model || 'claude-3-sonnet-20240229';
       const messages = req.body?.messages || [];
+      
       const prompt = JSON.stringify(messages);
       
       // Estimate tokens and cost
-      const inputTokens = estimateMessagesTokens(messages);
+      const inputTokens = estimateMessagesTokens(messages, model);
       const pricing = getModelPricing(model);
       if (!pricing) {
         console.warn(`Unknown model: ${model}, allowing request`);
@@ -125,27 +198,56 @@ export class ProxyServer {
       // Check cost limit
       if (estimatedCost > this.config.maxCostPerRequest) {
         const message = `Request blocked: Estimated cost $${estimatedCost.toFixed(4)} exceeds maximum $${this.config.maxCostPerRequest.toFixed(2)}`;
-        this.logRequest(model, inputTokens, 0, estimatedCost, true, 100, message, prompt);
+        this.logRequest(model, inputTokens, 0, estimatedCost, true, 100, message, prompt, {
+          category: 'spike',
+          severity: 'CRITICAL',
+          action: 'block',
+          killSwitchTriggered: true,
+        });
         res.status(403).json({ error: message, blocked: true });
         return;
       }
 
-      // Detect waste
-      const wasteResult = this.wasteDetector.detectWaste(model, prompt, estimatedCost);
+      // Detect danger
+      const detectionResult = this.wasteDetector.detect(
+        model,
+        prompt,
+        estimatedCost,
+        undefined,
+        this.config.trustMode,
+        false
+      );
       
-      if (wasteResult.isWasteful && wasteResult.wasteScore >= this.config.wasteThreshold) {
-        if (this.config.blockMode) {
-          const message = `Blocked request: ${wasteResult.reason}. Estimated waste: $${wasteResult.estimatedWaste.toFixed(4)}`;
-          this.logRequest(model, inputTokens, 0, estimatedCost, true, wasteResult.wasteScore, wasteResult.reason, prompt);
+      if (detectionResult.isDangerous && detectionResult.dangerScore >= this.config.dangerThreshold) {
+        const message = detectionResult.killSwitchTriggered 
+          ? `🔴 KILL SWITCH: ${detectionResult.reason}. 💸 Prevented: $${detectionResult.estimatedLoss.toFixed(4)}`
+          : `Blocked request: ${detectionResult.reason}. Estimated loss: $${detectionResult.estimatedLoss.toFixed(4)}`;
+        
+        this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, prompt, {
+          category: detectionResult.category,
+          severity: detectionResult.severity,
+          action: detectionResult.action,
+          killSwitchTriggered: detectionResult.killSwitchTriggered,
+        });
+        
+        if (detectionResult.action === 'block') {
           res.status(403).json({ 
             error: message, 
             blocked: true,
-            wasteScore: wasteResult.wasteScore,
-            suggestions: wasteResult.suggestions
+            dangerScore: detectionResult.dangerScore,
+            killSwitchTriggered: detectionResult.killSwitchTriggered,
+            suggestions: detectionResult.suggestions
           });
           return;
         } else {
-          console.warn(`Warning: ${wasteResult.reason}`);
+          const alert = formatAlert({
+            severity: detectionResult.severity,
+            category: detectionResult.category,
+            reason: detectionResult.reason,
+            estimatedLoss: detectionResult.estimatedLoss,
+            suggestions: detectionResult.suggestions,
+          });
+          if (alert) console.log(alert);
         }
       }
 
@@ -153,27 +255,114 @@ export class ProxyServer {
       await this.forwardRequest(req, res, 'https://api.anthropic.com');
       
       // Log successful request
-      this.logRequest(model, inputTokens, 0, estimatedCost, false, wasteResult.wasteScore, '', prompt);
+      this.logRequest(model, inputTokens, 0, estimatedCost, false, detectionResult.dangerScore, '', prompt, {
+        category: 'safe',
+        severity: 'SAFE',
+        action: 'allow',
+        killSwitchTriggered: false,
+      });
 
-    } catch (error) {
-      console.error('Error handling Anthropic request:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    } catch (error: any) {
+      console.error('Error handling Anthropic request:', error.message);
+      res.status(500).json({ error: 'Internal server error', message: error.message });
     }
   }
 
   private async forwardRequest(req: Request, res: Response, baseUrl: string): Promise<void> {
+    // Forward all headers except hop-by-hop headers
+    const hopByHopHeaders = [
+      'host',
+      'connection',
+      'keep-alive',
+      'transfer-encoding',
+      'te',
+      'trailer',
+      'upgrade',
+      'proxy-authorization',
+      'proxy-authenticate',
+    ];
+    
+    const headers: Record<string, string> = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value && !hopByHopHeaders.includes(key.toLowerCase())) {
+        headers[key] = Array.isArray(value) ? value[0] : value;
+      }
+    }
+    
+    // Preserve query parameters
+    const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
+    const url = `${baseUrl}${req.path}${queryString ? '?' + queryString : ''}`;
+    
+    // Check if streaming is requested
+    const isStreaming = req.body?.stream === true || req.query?.stream === 'true';
+    
     const axiosConfig: AxiosRequestConfig = {
       method: req.method,
-      url: `${baseUrl}${req.path}`,
+      url,
       headers: {
-        ...req.headers,
+        ...headers,
         host: new URL(baseUrl).host,
       },
       data: req.body,
+      timeout: 120000,
+      responseType: isStreaming ? 'stream' : 'json',
     };
 
-    const response = await axios(axiosConfig);
-    res.status(response.status).json(response.data);
+    // Retry logic with exponential backoff
+    const maxRetries = 3;
+    let lastError: any = null;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await axios(axiosConfig);
+        
+        res.status(response.status);
+        
+        // Forward headers (except hop-by-hop)
+        for (const [key, value] of Object.entries(response.headers)) {
+          if (!hopByHopHeaders.includes(key.toLowerCase())) {
+            res.setHeader(key, value);
+          }
+        }
+        
+        if (isStreaming && response.data) {
+          response.data.pipe(res);
+          return;
+        } else {
+          res.json(response.data);
+          return;
+        }
+      } catch (error: any) {
+        lastError = error;
+        
+        // Don't retry on client errors (4xx)
+        if (error.response && error.response.status >= 400 && error.response.status < 500) {
+          // Forward the actual error response
+          if (error.response.data) {
+            res.status(error.response.status);
+            res.json(error.response.data);
+          } else {
+            res.status(error.response.status).json({ error: error.message });
+          }
+          return;
+        }
+        
+        if (attempt === maxRetries) {
+          // Forward the actual error on final attempt
+          if (error.response) {
+            res.status(error.response.status).json(error.response.data || { error: error.message });
+          } else {
+            res.status(502).json({ error: 'Bad Gateway', message: error.message });
+          }
+          return;
+        }
+        
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError;
   }
 
   private logRequest(
@@ -182,39 +371,56 @@ export class ProxyServer {
     outputTokens: number,
     estimatedCost: number,
     wasBlocked: boolean,
-    wasteScore: number,
+    dangerScore: number,
     reason: string,
-    prompt: string
+    prompt: string,
+    decisionTrace?: any
   ): void {
-    const { createHash } = require('crypto');
     const promptHash = createHash('sha256').update(prompt).digest('hex');
+    const traceId = randomUUID();
 
     const entry: LogEntry = {
       timestamp: Date.now(),
+      traceId,
       model,
       inputTokens,
       outputTokens,
       estimatedCost,
       wasBlocked,
-      wasteScore,
+      dangerScore,
       reason,
       promptHash,
+      decisionTrace,
     };
 
     this.logger.log(entry);
 
     if (wasBlocked) {
-      console.log(`🚫 Blocked: ${reason} (waste score: ${wasteScore})`);
+      console.log(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
     }
   }
 
   start(): void {
-    this.app.listen(this.port, () => {
-      console.log(`\n🛡️  AI Waste Guard Proxy running on port ${this.port}`);
-      console.log(`📊 Block mode: ${this.config.blockMode ? 'ON' : 'OFF'}`);
+    this.server = this.app.listen(this.port, () => {
+      console.log(`\n🛡️  AI EXECUTION FIREWALL running on port ${this.port}`);
+      console.log(`🚨 Danger Blocking: ${this.config.trustMode === 'block' ? 'ACTIVE' : this.config.trustMode === 'warn' ? 'WARN' : 'MONITOR'}`);
       console.log(`💰 Max cost per request: $${this.config.maxCostPerRequest.toFixed(2)}`);
-      console.log(`⚠️  Waste threshold: ${this.config.wasteThreshold}%`);
+      console.log(`⚠️  Danger threshold: ${this.config.dangerThreshold}%`);
       console.log(`\nConfigure your AI SDK to use: http://localhost:${this.port}\n`);
     });
+
+    // Handle graceful shutdown
+    process.on('SIGTERM', () => this.stop());
+    process.on('SIGINT', () => this.stop());
+  }
+
+  stop(): void {
+    if (this.server) {
+      this.server.close(() => {
+    this.wasteDetector.destroy();
+        console.log('\n🛡️  AI Execution Firewall stopped gracefully');
+        this.wasteDetector.destroy();
+      });
+    }
   }
 }

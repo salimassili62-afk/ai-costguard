@@ -3,7 +3,8 @@ import { Logger, LogEntry } from '../logger';
 import { estimateTokens, estimateMessagesTokens } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
 import { ConfigManager } from '../config';
-import { createHash } from 'crypto';
+import { formatAlert } from '../utils/alert';
+import { createHash, randomUUID } from 'crypto';
 
 export interface AIRequestOptions {
   model: string;
@@ -17,13 +18,15 @@ export interface AIResponse {
   success: boolean;
   blocked?: boolean;
   data?: any;
-  wasteScore?: number;
+  dangerScore?: number;
   reason?: string;
   suggestions?: string[];
   estimatedCost?: number;
+  savedAmount?: number;
+  killSwitchTriggered?: boolean;
 }
 
-export class AIWasteGuard {
+export class AIExecutionFirewall {
   private wasteDetector: WasteDetector;
   private logger: Logger;
   private config: ConfigManager;
@@ -34,80 +37,102 @@ export class AIWasteGuard {
     this.config = new ConfigManager();
   }
 
-  /**
-   * Call an AI API with waste detection
-   * @param apiCall - The actual API call function (e.g., openai.chat.completions.create)
-   * @param options - Request options
-   */
   async call<T = any>(
     apiCall: () => Promise<T>,
     options: AIRequestOptions
   ): Promise<AIResponse & { data?: T }> {
     const { model, prompt, messages, context, overrideBlock } = options;
     
-    // Determine the text to analyze
     const textToAnalyze = prompt || JSON.stringify(messages || '');
     
-    // Estimate tokens and cost
     const inputTokens = messages 
-      ? estimateMessagesTokens(messages)
-      : estimateTokens(prompt || '');
+      ? estimateMessagesTokens(messages, model)
+      : estimateTokens(prompt || '', model);
     
     const pricing = getModelPricing(model);
     if (!pricing) {
-      console.warn(`Unknown model: ${model}, allowing request`);
+      console.warn(`⚠️  Unknown model: ${model}, allowing request`);
       const data = await apiCall();
       return { success: true, data };
     }
 
     const estimatedCost = estimateCost(model, inputTokens, 1000);
 
-    // Check cost limit
     if (estimatedCost > this.config.maxCostPerRequest) {
-      const message = `Request blocked: Estimated cost $${estimatedCost.toFixed(4)} exceeds maximum $${this.config.maxCostPerRequest.toFixed(2)}`;
-      this.logRequest(model, inputTokens, 0, estimatedCost, true, 100, message, textToAnalyze);
+      const savedAmount = estimatedCost;
+      const alert = formatAlert({
+        severity: 'CRITICAL',
+        category: 'spike',
+        reason: `Cost limit exceeded: Request cost $${estimatedCost.toFixed(4)} exceeds limit $${this.config.maxCostPerRequest.toFixed(2)}`,
+        estimatedLoss: savedAmount,
+        suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
+      });
+      if (alert) console.log(alert);
+
+      this.logRequest(model, inputTokens, 0, estimatedCost, true, 100, 'Cost limit protection', textToAnalyze);
       return {
         success: false,
         blocked: true,
-        wasteScore: 100,
-        reason: message,
+        dangerScore: 100,
+        reason: `Cost limit exceeded`,
         estimatedCost,
+        savedAmount,
+        killSwitchTriggered: true,
       };
     }
 
-    // Detect waste
-    const wasteResult = this.wasteDetector.detectWaste(model, textToAnalyze, estimatedCost, context);
+    const detectionResult = this.wasteDetector.detect(
+      model,
+      textToAnalyze,
+      estimatedCost,
+      context,
+      this.config.trustMode,
+      overrideBlock
+    );
     
-    if (wasteResult.isWasteful && wasteResult.wasteScore >= this.config.wasteThreshold) {
-      if (this.config.blockMode && !overrideBlock) {
-        const message = `Blocked request: ${wasteResult.reason}. Estimated waste: $${wasteResult.estimatedWaste.toFixed(4)}`;
-        this.logRequest(model, inputTokens, 0, estimatedCost, true, wasteResult.wasteScore, wasteResult.reason, textToAnalyze);
+    if (detectionResult.isDangerous && detectionResult.dangerScore >= this.config.dangerThreshold) {
+      if (detectionResult.action === 'block' && !overrideBlock) {
+        const alert = formatAlert({
+          severity: detectionResult.severity,
+          category: detectionResult.category,
+          reason: detectionResult.reason,
+          estimatedLoss: detectionResult.estimatedLoss,
+          suggestions: detectionResult.suggestions,
+        });
+        if (alert) console.log(alert);
+
+        this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, textToAnalyze);
         
         return {
           success: false,
           blocked: true,
-          wasteScore: wasteResult.wasteScore,
-          reason: message,
-          suggestions: wasteResult.suggestions,
-          estimatedCost: wasteResult.estimatedWaste,
+          dangerScore: detectionResult.dangerScore,
+          reason: detectionResult.reason,
+          suggestions: detectionResult.suggestions,
+          estimatedCost: detectionResult.estimatedLoss,
+          killSwitchTriggered: detectionResult.killSwitchTriggered,
         };
       } else {
-        console.warn(`⚠️  Warning: ${wasteResult.reason}`);
+        console.log(`⚠️  Warning: ${detectionResult.reason} (danger score: ${detectionResult.dangerScore})`);
       }
     }
 
-    // Execute the API call
     try {
-      const data = await apiCall();
-      
-      // Log successful request
-      this.logRequest(model, inputTokens, 0, estimatedCost, false, wasteResult.wasteScore, '', textToAnalyze);
+      const result = await apiCall();
+      this.logRequest(model, inputTokens, 0, estimatedCost, false, detectionResult.dangerScore, '', textToAnalyze, {
+        category: 'safe',
+        severity: 'SAFE',
+        action: 'allow',
+        killSwitchTriggered: false,
+      });
       
       return {
         success: true,
-        data,
-        wasteScore: wasteResult.wasteScore,
+        data: result,
+        dangerScore: detectionResult.dangerScore,
         estimatedCost,
+        savedAmount: 0,
+        killSwitchTriggered: false,
       };
     } catch (error) {
       console.error('API call failed:', error);
@@ -119,9 +144,6 @@ export class AIWasteGuard {
     }
   }
 
-  /**
-   * Simple wrapper for OpenAI-style calls
-   */
   async callOpenAI(
     apiCall: () => Promise<any>,
     model: string,
@@ -131,9 +153,6 @@ export class AIWasteGuard {
     return this.call(apiCall, { model, messages, overrideBlock });
   }
 
-  /**
-   * Simple wrapper for Anthropic-style calls
-   */
   async callAnthropic(
     apiCall: () => Promise<any>,
     model: string,
@@ -149,42 +168,40 @@ export class AIWasteGuard {
     outputTokens: number,
     estimatedCost: number,
     wasBlocked: boolean,
-    wasteScore: number,
+    dangerScore: number,
     reason: string,
-    prompt: string
+    prompt: string,
+    decisionTrace?: any
   ): void {
     const promptHash = createHash('sha256').update(prompt).digest('hex');
+    const traceId = randomUUID();
 
     const entry: LogEntry = {
       timestamp: Date.now(),
+      traceId,
       model,
       inputTokens,
       outputTokens,
       estimatedCost,
       wasBlocked,
-      wasteScore,
+      dangerScore,
       reason,
       promptHash,
+      decisionTrace,
     };
 
     this.logger.log(entry);
 
     if (wasBlocked) {
-      console.log(`🚫 Blocked: ${reason} (waste score: ${wasteScore})`);
+      console.log(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
     }
   }
 
-  /**
-   * Get statistics
-   */
   getStats(hours: number = 24) {
     return this.logger.getStats(hours);
   }
 
-  /**
-   * Update configuration
-   */
-  updateConfig(updates: Partial<{ blockMode: boolean; maxCostPerRequest: number; wasteThreshold: number }>) {
+  updateConfig(updates: Partial<{ trustMode: 'monitor' | 'warn' | 'block'; maxCostPerRequest: number; dangerThreshold: number }>) {
     this.config.updateConfig(updates);
   }
 }

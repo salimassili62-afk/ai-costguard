@@ -2,22 +2,28 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 
+export type TrustMode = 'monitor' | 'warn' | 'block';
+
 export interface UserConfig {
-  blockMode: boolean;
+  trustMode: TrustMode;
   maxCostPerRequest: number;
-  wasteThreshold: number;
+  dangerThreshold: number;
   allowOverride: boolean;
   proxyPort: number;
   logRetentionDays: number;
+  apiKey?: string;
+  rateLimitPerMinute: number;
 }
 
 const DEFAULT_CONFIG: UserConfig = {
-  blockMode: true,
+  trustMode: 'warn',
   maxCostPerRequest: 1.0,
-  wasteThreshold: 50,
+  dangerThreshold: 50,
   allowOverride: true,
   proxyPort: 3000,
   logRetentionDays: 30,
+  apiKey: undefined,
+  rateLimitPerMinute: 60,
 };
 
 export class ConfigManager {
@@ -26,7 +32,7 @@ export class ConfigManager {
 
   constructor(customConfigPath?: string) {
     const homeDir = os.homedir();
-    const configDir = path.join(homeDir, '.ai-waste-guard');
+    const configDir = path.join(homeDir, '.ai-execution-firewall');
     
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
@@ -70,16 +76,16 @@ export class ConfigManager {
     this.saveConfig(this.config);
   }
 
-  get blockMode(): boolean {
-    return this.config.blockMode;
+  get trustMode(): TrustMode {
+    return this.config.trustMode;
   }
 
   get maxCostPerRequest(): number {
     return this.config.maxCostPerRequest;
   }
 
-  get wasteThreshold(): number {
-    return this.config.wasteThreshold;
+  get dangerThreshold(): number {
+    return this.config.dangerThreshold;
   }
 
   get allowOverride(): boolean {
@@ -88,5 +94,13 @@ export class ConfigManager {
 
   get proxyPort(): number {
     return this.config.proxyPort;
+  }
+
+  get apiKey(): string | undefined {
+    return this.config.apiKey;
+  }
+
+  get rateLimitPerMinute(): number {
+    return this.config.rateLimitPerMinute;
   }
 }

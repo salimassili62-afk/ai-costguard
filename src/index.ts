@@ -4,4 +4,4 @@ export * from './waste-detection';
 export * from './logger';
 export * from './proxy';
 export * from './wrapper';
-export { AIWasteGuard } from './wrapper';
+export { AIExecutionFirewall } from './wrapper';
