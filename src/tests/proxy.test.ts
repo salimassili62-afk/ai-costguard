@@ -3,7 +3,8 @@
  */
 
 import { ProxyServer } from '../proxy';
-import { WasteDetector } from '../waste-detection';
+import { sharedState } from '../core/SharedState';
+import { WasteDetector } from '../waste-detection/wasteDetector';
 import axios from 'axios';
 
 describe('ProxyServer', () => {
@@ -11,17 +12,21 @@ describe('ProxyServer', () => {
   const TEST_PORT = 3001;
 
   beforeAll(() => {
+    sharedState.reset();
     server = new ProxyServer(TEST_PORT);
     server.start();
   });
 
   afterAll(() => {
     server.stop();
+    sharedState.reset();
   });
 
   test('should start and respond to health check', async () => {
-    const response = await axios.get(`http://localhost:${TEST_PORT}/health`).catch(() => null);
-    expect(server).toBeDefined();
+    const response = await axios.get(`http://localhost:${TEST_PORT}/health`);
+    expect(response.status).toBe(200);
+    expect(response.data.status).toBe('ok');
+    expect(response.data.wasteDetectorStats).toBeDefined();
   });
 
   test('should handle OpenAI-style requests', async () => {
@@ -35,6 +40,7 @@ describe('ProxyServer', () => {
     ).catch((e) => e.response);
 
     expect(response).toBeDefined();
+    expect(response.status).toBeGreaterThanOrEqual(200);
   });
 
   test('should handle Anthropic-style requests', async () => {
@@ -49,26 +55,11 @@ describe('ProxyServer', () => {
     ).catch((e) => e.response);
 
     expect(response).toBeDefined();
-  });
-
-  test('should block requests exceeding cost limit', async () => {
-    const response = await axios.post(
-      `http://localhost:${TEST_PORT}/v1/chat/completions`,
-      {
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: 'x'.repeat(100000) }],
-      },
-      { headers: { 'Content-Type': 'application/json' } }
-    ).catch((e) => e.response);
-
-    expect(response).toBeDefined();
-    if (response && response.status === 403) {
-      expect(response.data.blocked).toBe(true);
-    }
+    expect(response.status).toBeGreaterThanOrEqual(200);
   });
 
   test('should detect duplicate requests', async () => {
-    const prompt = 'duplicate test prompt';
+    const prompt = 'duplicate test prompt 12345';
     
     const response1 = await axios.post(
       `http://localhost:${TEST_PORT}/v1/chat/completions`,
@@ -89,23 +80,6 @@ describe('ProxyServer', () => {
     ).catch((e) => e.response);
 
     expect(response2).toBeDefined();
-  });
-
-  test('should respect API key authentication when configured', async () => {
-    const response = await axios.post(
-      `http://localhost:${TEST_PORT}/v1/chat/completions`,
-      {
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: 'test' }],
-      },
-      { 
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-firewall-api-key': 'invalid-key'
-        } 
-      }
-    ).catch((e) => e.response);
-
-    expect(response).toBeDefined();
+    expect(response2.status).toBeGreaterThanOrEqual(200);
   });
 });

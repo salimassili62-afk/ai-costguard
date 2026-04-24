@@ -19,7 +19,7 @@ export interface DetectionResult {
  */
 export class WasteDetector {
   private history: HistoryStorage;
-  private readonly RAPID_REQUEST_THRESHOLD = 5; // requests within 30 seconds
+  private readonly RAPID_REQUEST_THRESHOLD = 3; // requests within 30 seconds (reduced from 5 for earlier detection)
   private readonly RAPID_REQUEST_WINDOW = 30000; // 30 seconds
   private readonly ANOMALY_DEVIATION_THRESHOLD = 3; // 3x standard deviation
   private readonly KILL_SWITCH_THRESHOLD = 90; // danger score that triggers kill switch
@@ -181,8 +181,8 @@ export class WasteDetector {
 
     if (recent.length >= this.RAPID_REQUEST_THRESHOLD) {
       const totalLoss = estimatedCost * recent.length;
-      // Adaptive threshold: more aggressive with higher counts
-      const adaptiveScore = Math.min(100, 80 + (recent.length - this.RAPID_REQUEST_THRESHOLD) * 5);
+      // Adaptive threshold: more aggressive with higher counts (base score 90 to hit kill switch immediately)
+      const adaptiveScore = Math.min(100, 90 + (recent.length - this.RAPID_REQUEST_THRESHOLD) * 3);
 
       return {
         isDangerous: true,
@@ -239,10 +239,27 @@ export class WasteDetector {
    */
   private detectFuzzyDuplicate(prompt: string, model: string, estimatedCost: number, now: number): DetectionResult {
     const recentRecords = this.history.getRecordsInWindow(3600000); // 1 hour
-    const SIMILARITY_THRESHOLD = 0.85; // 85% similarity threshold
+    const SIMILARITY_THRESHOLD = 0.70; // 70% similarity threshold (lowered from 85%)
+
+    // Skip if this exact prompt already triggered duplicate detection
+    const exactMatches = this.history.getRecentRecords(this.fingerprint(prompt, ''), 3600000);
+    if (exactMatches.length > 0) {
+      return { isDangerous: false, dangerScore: 0, severity: 'SAFE', reason: '', suggestions: [], estimatedLoss: 0, category: 'fuzzy_duplicate', killSwitchTriggered: false };
+    }
+
+    let maxSimilarity = 0;
+    let bestMatch: RequestRecord | null = null;
 
     for (const record of recentRecords) {
+      // Skip exact matches (already handled by duplicate detection)
+      if (record.prompt === prompt) continue;
+      
       const similarity = this.calculateSimilarity(prompt, record.prompt);
+      if (similarity > maxSimilarity) {
+        maxSimilarity = similarity;
+        bestMatch = record;
+      }
+      
       if (similarity >= SIMILARITY_THRESHOLD) {
         const totalLoss = estimatedCost * (recentRecords.length + 1) / 2; // Estimate
         
@@ -311,14 +328,14 @@ export class WasteDetector {
     const contextRatio = contextLength / (promptLength || 1);
     const contextPercentage = (contextLength / (promptLength + contextLength)) * 100;
 
-    if (contextRatio > 20) {
+    if (contextRatio >= 20) {
       const wastePercentage = Math.min(55, Math.log(contextRatio) * 15);
       const estimatedLoss = estimatedCost * (wastePercentage / 100);
 
       return {
         isDangerous: true,
         dangerScore: Math.min(75, 30 + wastePercentage),
-        severity: contextRatio > 50 ? 'HIGH' : 'MEDIUM',
+        severity: contextRatio >= 50 ? 'CRITICAL' : 'HIGH',
         category: 'context',
         reason: `💸 CONTEXT EXPLOSION: Context is ${contextRatio.toFixed(1)}x larger than prompt (${contextPercentage.toFixed(0)}% of total)`,
         suggestions: [
@@ -331,14 +348,14 @@ export class WasteDetector {
       };
     }
 
-    if (contextRatio > 5) {
-      const wastePercentage = Math.log(contextRatio) * 8;
+    if (contextRatio >= 5) {
+      const wastePercentage = Math.log(contextRatio) * 10;
       const estimatedLoss = estimatedCost * (wastePercentage / 100);
 
       return {
         isDangerous: true,
-        dangerScore: Math.min(65, 20 + wastePercentage),
-        severity: 'MEDIUM',
+        dangerScore: Math.min(70, 25 + wastePercentage),
+        severity: 'HIGH',
         category: 'context',
         reason: `⚠️ ABNORMAL CONTEXT SIZE: Context is ${contextRatio.toFixed(1)}x larger than prompt`,
         suggestions: [
@@ -358,16 +375,19 @@ export class WasteDetector {
    * Detect cost spikes (single expensive request)
    */
   private detectCostSpike(estimatedCost: number): DetectionResult {
-    if (estimatedCost > 1.0) {
-      const dangerScore = Math.min(100, 30 + (estimatedCost - 1.0) * 20);
+    // Trigger warnings starting at $0.05, critical at $1.0+
+    if (estimatedCost >= 0.05) {
+      const baseScore = 30;
+      const costMultiplier = (estimatedCost - 0.05) * 50; // Scale increases sharply with cost
+      const dangerScore = Math.min(100, baseScore + costMultiplier);
       const isKillSwitch = dangerScore >= this.KILL_SWITCH_THRESHOLD;
 
       return {
         isDangerous: true,
         dangerScore,
-        severity: estimatedCost > 5 ? 'CRITICAL' : 'HIGH',
+        severity: estimatedCost > 1.0 ? 'CRITICAL' : estimatedCost >= 0.5 ? 'HIGH' : 'MEDIUM',
         category: 'spike',
-        reason: isKillSwitch ? `🔴 KILL SWITCH: EXTREME COST - $${estimatedCost.toFixed(2)}` : `💸 COST SPIKE: Single request costs $${estimatedCost.toFixed(2)}`,
+        reason: isKillSwitch ? `🔴 KILL SWITCH: EXTREME COST - $${estimatedCost.toFixed(2)}` : `💸 COST SPIKE: Single request costs $${estimatedCost.toFixed(2)}` + (estimatedCost < 0.1 ? ' (production threshold)' : ''),
         suggestions: [
           'Consider if this really needs to be done now',
           'Use a cheaper model (gpt-4o-mini, claude-haiku)',

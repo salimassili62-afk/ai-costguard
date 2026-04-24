@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { ProxyServer } from '../proxy';
 import { ConfigManager } from '../config';
-import { WasteDetector } from '../waste-detection';
+import { sharedState } from '../core/SharedState';
 import { estimateTokens, estimateMessagesTokens } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
 
@@ -30,7 +30,7 @@ program
   .description('View firewall protection statistics')
   .option('-h, --hours <hours>', 'Hours to report on', '24')
   .action((options) => {
-    const detector = new WasteDetector();
+    const detector = sharedState.getWasteDetector();
     const hours = parseInt(options.hours) || 24;
     const stats = detector.getStats(hours);
     
@@ -102,7 +102,7 @@ program
   .description('View firewall block log')
   .option('-n, --number <count>', 'Number of blocks to show', '10')
   .action((options) => {
-    const detector = new WasteDetector();
+    const detector = sharedState.getWasteDetector();
     const blocked = detector.getBlockedRequests(parseInt(options.number));
     
     console.log(chalk.red.bold('\n🛡️  FIREWALL BLOCK LOG\n'));
@@ -152,7 +152,7 @@ program
     const estimatedCost = estimateCost(model, estimatedInputTokens, estimatedOutputTokens);
 
     // Analyze for danger
-    const detector = new WasteDetector();
+    const detector = sharedState.getWasteDetector();
     const riskAnalysis = detector.detect(model, prompt, estimatedCost, context, 'warn', false);
 
     // Format output - emotional + financial

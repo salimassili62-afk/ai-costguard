@@ -56,27 +56,3 @@ export function formatAlert(data: AlertData): string {
   output += '\n';
   return output;
 }
-
-export function formatSessionReport(stats: {
-  totalRequests: number;
-  blockedRequests: number;
-  warnedRequests: number;
-  totalCost: number;
-  preventedCost: number;
-  duration: number; // in seconds
-}): string {
-  const { totalRequests, blockedRequests, warnedRequests, totalCost, preventedCost, duration } = stats;
-  
-  let output = '\n';
-  output += chalk.bold.blue('📊 SESSION REPORT\n');
-  output += chalk.gray('─'.repeat(40) + '\n');
-  output += chalk.white(`Total Requests: ${chalk.cyan(totalRequests)}\n`);
-  output += chalk.red(`Blocked: ${chalk.bold(blockedRequests)}\n`);
-  output += chalk.yellow(`Warnings: ${chalk.bold(warnedRequests)}\n`);
-  output += chalk.white(`Total Cost: ${chalk.green(`$${totalCost.toFixed(4)}`)}\n`);
-  output += chalk.green(`Loss Prevented: ${chalk.bold(`$${preventedCost.toFixed(4)}`)}\n`);
-  output += chalk.gray(`Duration: ${Math.floor(duration / 60)}m ${duration % 60}s\n`);
-  output += '\n';
-  
-  return output;
-}

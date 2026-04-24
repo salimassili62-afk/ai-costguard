@@ -2,17 +2,19 @@
  * Unit tests for WasteDetector
  */
 
-import { WasteDetector } from '../waste-detection';
+import { WasteDetector } from '../waste-detection/wasteDetector';
+import { sharedState } from '../core/SharedState';
 
 describe('WasteDetector', () => {
   let detector: WasteDetector;
 
   beforeEach(() => {
-    detector = new WasteDetector();
+    sharedState.reset();
+    detector = sharedState.getWasteDetector();
   });
 
   afterEach(() => {
-    detector.destroy();
+    sharedState.reset();
   });
 
   test('should detect duplicate requests', () => {

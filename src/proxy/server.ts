@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import axios, { AxiosRequestConfig } from 'axios';
-import { WasteDetector } from '../waste-detection';
+import { sharedState } from '../core/SharedState';
+import { WasteDetector } from '../waste-detection/wasteDetector';
 import { Logger, LogEntry } from '../logger';
 import { estimateTokens, estimateMessagesTokens } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
@@ -15,13 +16,15 @@ export class ProxyServer {
   private config: ConfigManager;
   private port: number;
   private server: any;
+  private rateLimitMap: Map<string, number[]>;
 
   constructor(port?: number) {
     this.app = express();
-    this.wasteDetector = new WasteDetector();
+    this.wasteDetector = sharedState.getWasteDetector();
     this.logger = new Logger();
     this.config = new ConfigManager();
     this.port = port || this.config.proxyPort;
+    this.rateLimitMap = new Map<string, number[]>();
 
     this.setupMiddleware();
     this.setupRoutes();
@@ -31,13 +34,12 @@ export class ProxyServer {
     this.app.use(express.json({ limit: '10mb' }));
     
     // Rate limiting middleware
-    const rateLimitMap = new Map<string, number[]>();
     this.app.use((req, res, next) => {
       const clientIp = req.ip || 'unknown';
       const now = Date.now();
       const oneMinuteAgo = now - 60000;
       
-      const requests = rateLimitMap.get(clientIp) || [];
+      const requests = this.rateLimitMap.get(clientIp) || [];
       const recentRequests = requests.filter(t => t > oneMinuteAgo);
       
       if (recentRequests.length >= this.config.rateLimitPerMinute) {
@@ -46,7 +48,7 @@ export class ProxyServer {
       }
       
       recentRequests.push(now);
-      rateLimitMap.set(clientIp, recentRequests);
+      this.rateLimitMap.set(clientIp, recentRequests);
       next();
     });
     

@@ -1,4 +1,5 @@
-import { WasteDetector } from '../waste-detection';
+import { sharedState } from '../core/SharedState';
+import { WasteDetector } from '../waste-detection/wasteDetector';
 import { Logger, LogEntry } from '../logger';
 import { estimateTokens, estimateMessagesTokens } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
@@ -32,7 +33,7 @@ export class AIExecutionFirewall {
   private config: ConfigManager;
 
   constructor() {
-    this.wasteDetector = new WasteDetector();
+    this.wasteDetector = sharedState.getWasteDetector();
     this.logger = new Logger();
     this.config = new ConfigManager();
   }

@@ -4,7 +4,7 @@
  * This shows how to use AI Execution Firewall proxy with OpenAI SDK
  */
 
-const OpenAI = require('openai');
+import OpenAI from 'openai';
 
 // Configure OpenAI to use the firewall proxy
 const openai = new OpenAI({
@@ -20,7 +20,7 @@ async function main() {
     });
     
     console.log('Response:', response.choices[0].message.content);
-  } catch (error) {
+  } catch (error: any) {
     if (error.response?.data?.blocked) {
       console.log('🔴 Request blocked by firewall');
       console.log('Reason:', error.response.data.error);
