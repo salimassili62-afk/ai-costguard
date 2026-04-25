@@ -150,13 +150,10 @@ export const SEVERITY = {
 
 export type Severity = typeof SEVERITY[keyof typeof SEVERITY];
 
-// File Paths
+// File Paths - Unified storage directory
 export const PATHS = {
-  // Config directory
-  CONFIG_DIR: '.ai-execution-firewall',
-
-  // State directory (short form)
-  STATE_DIR: '.aifw',
+  // Unified application directory
+  APP_DIR: '.aifw',
 
   // Config file
   CONFIG_FILE: 'config.json',

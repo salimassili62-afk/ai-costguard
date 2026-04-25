@@ -16,17 +16,18 @@ If you discover a security vulnerability, please report it privately:
 
 ### Authentication
 - Optional API key authentication for proxy mode via `x-firewall-api-key` header
-- API keys stored in local config file (`~/.ai-execution-firewall/config.json`)
+- API keys stored in local config file (`~/.aifw/config.json`)
 
 ### Rate Limiting
 - Per-IP rate limiting (configurable, default: 60 requests/minute)
 - In-memory implementation for performance
 
 ### Data Privacy
-- Only SHA-256 hashes of prompts are stored in logs
-- No raw prompt content or API keys are logged
-- All data stored locally on the user's machine
-- No telemetry or external network calls
+- **Prompt Storage**: Full prompt text is stored in plaintext in `~/.aifw/history.jsonl`
+- **Hash Storage**: SHA-256 hashes stored for duplicate detection
+- **API Keys**: Not logged, only stored in config file
+- **Local Only**: All data stored locally on user's machine
+- **No Telemetry**: No external network calls
 
 ### Transport Security
 - Proxy mode forwards requests to upstream APIs (OpenAI, Anthropic)

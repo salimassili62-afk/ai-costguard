@@ -123,7 +123,7 @@ aifw blocked              # View blocked requests log
    - `warn`: Allow dangerous (<90), log warning
    - `block`: Block dangerous (≥50), allow safe
    - Kill switch: Always block (≥90)
-5. **Logging**: Records to `~/.aifw/history.jsonl` with prompt hashes (SHA-256)
+5. **Logging**: Records to `~/.aifw/history.jsonl` with full prompt text (plaintext)
 
 ## Kill Switch
 
@@ -148,7 +148,7 @@ Activates at danger score ≥90. Always blocks regardless of trust mode.
 
 - **API Key Authentication**: Proxy validates `x-firewall-api-key` header against configured key
 - **Rate Limiting**: Per-IP limiting (default: 60 req/min). Returns HTTP 429 with `Retry-After: 60`
-- **Data Storage**: Prompts stored in plaintext in `~/.aifw/history.jsonl` (not hashed in current implementation)
+- **Data Storage**: Prompts stored in plaintext in `~/.aifw/history.jsonl` (SHA-256 hash also recorded for deduplication)
 - **Local Only**: All data in `~/.aifw/` directory, no external calls
 - **No Telemetry**: No data sent to external servers
 

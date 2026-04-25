@@ -32,7 +32,7 @@ export class ConfigManager {
 
   constructor(customConfigPath?: string) {
     const homeDir = os.homedir();
-    const configDir = path.join(homeDir, '.ai-execution-firewall');
+    const configDir = path.join(homeDir, '.aifw');
     
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });

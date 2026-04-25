@@ -36,7 +36,7 @@ export class Logger {
 
   constructor(customLogPath?: string) {
     const homeDir = os.homedir();
-    this.logDir = path.join(homeDir, '.ai-execution-firewall');
+    this.logDir = path.join(homeDir, '.aifw');
     
     if (!fs.existsSync(this.logDir)) {
       fs.mkdirSync(this.logDir, { recursive: true });
