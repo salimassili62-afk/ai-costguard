@@ -12,12 +12,15 @@ AI Execution Firewall sits between your code and AI APIs, detecting and blocking
 
 ## What It Detects
 
-- **Runaway loops**: 5+ identical requests in 30 seconds (kill switch triggered)
-- **Duplicate requests**: Same prompt sent repeatedly within 1 hour
-- **Fuzzy duplicates**: Similar prompts (85%+ similarity) using Levenshtein distance
-- **Context explosions**: Oversized payloads relative to prompt size
-- **Cost spikes**: Single requests exceeding configured limits
-- **Anomalies**: Behavioral deviation from normal usage patterns
+| Pattern | Threshold | Action |
+|---------|-----------|--------|
+| **Runaway loops** | 3+ identical requests in 30 seconds | Kill switch (block, danger score 93+) |
+| **Duplicate requests** | Same prompt within 1 hour | Warn/block (danger score 40-90) |
+| **Fuzzy duplicates** | 70%+ similarity (Levenshtein) | Warn/block (danger score 30-70) |
+| **Context explosions** | Context 5x+ larger than prompt | Warn/block (danger score 25-75) |
+| **Cost spikes** | $0.05+ per request | Warn/block (danger score 30-100) |
+
+Kill switch activates at danger score ≥90, blocking regardless of trust mode.
 
 ## Installation
 
@@ -107,27 +110,56 @@ aifw blocked              # View blocked requests log
 
 ## How It Works
 
-1. **Request Interception**: Firewall intercepts AI API requests
-2. **Pattern Analysis**: Analyzes request against detection rules
-3. **Risk Scoring**: Calculates danger score (0-100) based on patterns
-4. **Action Decision**: Blocks, warns, or allows based on trust mode
-5. **Logging**: Records all requests with cost estimates for analytics
+1. **Request Interception**: Firewall intercepts AI API requests via Proxy or SDK wrapper
+2. **Pattern Analysis**: DetectionEngine analyzes against 5 rule types (loop, duplicate, cost, context, fuzzy)
+3. **Risk Scoring**: Calculates danger score (0-100) based on thresholds:
+   - Loop: 90 + (count-2)×3, capped at 100
+   - Duplicate: 40 + count×10, capped at 90
+   - Cost: 30 + (cost-0.05)×50, capped at 100
+   - Context: 25 + ln(ratio)×15, capped at 75
+   - Fuzzy: 30 + similarity×40, capped at 70
+4. **Action Decision**: 
+   - `monitor`: Allow all, log only
+   - `warn`: Allow dangerous (<90), log warning
+   - `block`: Block dangerous (≥50), allow safe
+   - Kill switch: Always block (≥90)
+5. **Logging**: Records to `~/.aifw/history.jsonl` with prompt hashes (SHA-256)
 
 ## Kill Switch
 
-Critical patterns (runaway loops, extreme cost spikes) trigger the kill switch, instantly blocking requests regardless of trust mode. This prevents catastrophic cost spikes.
+Activates at danger score ≥90. Always blocks regardless of trust mode.
+
+**Triggers:**
+- Runaway loops: 3+ identical requests in 30s (starts at 93, escalates to 100)
+- Cost spikes: $1.25+ per request (reaches 90 at $1.25)
+
+**Response format (HTTP 403):**
+```json
+{
+  "error": "🔴 KILL SWITCH: RUNAWAY LOOP - 3 identical requests in 30 seconds. 💸 Prevented: $0.XX",
+  "blocked": true,
+  "dangerScore": 93,
+  "killSwitchTriggered": true,
+  "suggestions": ["Use a cheaper model", "Reduce token count", "Split into smaller requests"]
+}
+```
 
 ## Security
 
-- **API Key Authentication**: Proxy supports optional API key via `x-firewall-api-key` header
-- **Rate Limiting**: Configurable per-IP rate limiting (default: 60 requests/minute)
-- **No Sensitive Data Logging**: Only prompt hashes (SHA-256) are stored, never raw prompts
-- **Local Storage Only**: All data stored locally in `~/.ai-execution-firewall/`
-- **No External Calls**: No telemetry or data sent to external servers
+- **API Key Authentication**: Proxy validates `x-firewall-api-key` header against configured key
+- **Rate Limiting**: Per-IP limiting (default: 60 req/min). Returns HTTP 429 with `Retry-After: 60`
+- **Data Storage**: Prompts stored in plaintext in `~/.aifw/history.jsonl` (not hashed in current implementation)
+- **Local Only**: All data in `~/.aifw/` directory, no external calls
+- **No Telemetry**: No data sent to external servers
 
 ## Privacy
 
-All data stored locally in `~/.ai-execution-firewall/`. No data sent to external servers.
+All data stored locally in `~/.aifw/`:
+- `history.jsonl` - Request history (prompts, costs, danger scores)
+- `logs.jsonl` - Detailed request logs
+- `config.json` - User configuration
+
+No data sent to external servers. No telemetry collected.
 
 ## License
 

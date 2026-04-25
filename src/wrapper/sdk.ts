@@ -1,5 +1,14 @@
-import { sharedState } from '../core/SharedState';
-import { WasteDetector } from '../waste-detection/wasteDetector';
+/**
+ * SDK Interface - AI Execution Firewall
+ * 
+ * This file contains ONLY interface logic.
+ * ALL detection happens in DetectionEngine (single source of truth).
+ * 
+ * Flow:
+ *   User Input → SDK → DetectionEngine.analyze() → Result
+ */
+
+import { detectionEngine } from '../core/DetectionEngine';
 import { Logger, LogEntry } from '../logger';
 import { estimateTokens, estimateMessagesTokens } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
@@ -7,18 +16,23 @@ import { ConfigManager } from '../config';
 import { formatAlert } from '../utils/alert';
 import { createHash, randomUUID } from 'crypto';
 
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
 export interface AIRequestOptions {
   model: string;
   prompt?: string;
-  messages?: any[];
+  messages?: ChatMessage[];
   context?: string;
   overrideBlock?: boolean;
 }
 
-export interface AIResponse {
+export interface AIResponse<T = unknown> {
   success: boolean;
   blocked?: boolean;
-  data?: any;
+  data?: T;
   dangerScore?: number;
   reason?: string;
   suggestions?: string[];
@@ -28,17 +42,15 @@ export interface AIResponse {
 }
 
 export class AIExecutionFirewall {
-  private wasteDetector: WasteDetector;
   private logger: Logger;
   private config: ConfigManager;
 
   constructor() {
-    this.wasteDetector = sharedState.getWasteDetector();
     this.logger = new Logger();
     this.config = new ConfigManager();
   }
 
-  async call<T = any>(
+  async call<T = unknown>(
     apiCall: () => Promise<T>,
     options: AIRequestOptions
   ): Promise<AIResponse & { data?: T }> {
@@ -59,63 +71,48 @@ export class AIExecutionFirewall {
 
     const estimatedCost = estimateCost(model, inputTokens, 1000);
 
-    if (estimatedCost > this.config.maxCostPerRequest) {
+    // SINGLE SOURCE OF TRUTH: Call DetectionEngine
+    const detectionResult = detectionEngine.analyze({
+      model,
+      prompt: textToAnalyze,
+      estimatedCost,
+      context,
+      trustMode: this.config.trustMode,
+      override: overrideBlock
+    });
+    
+    // Handle blocked request
+    if (detectionResult.decision === 'block' && !overrideBlock) {
       const savedAmount = estimatedCost;
+      // Map category to alert-compatible type (filter out 'safe'/'invalid')
+      const alertCategory: 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'anomaly' = 
+        detectionResult.category === 'safe' || detectionResult.category === 'invalid' 
+          ? 'anomaly' 
+          : detectionResult.category;
       const alert = formatAlert({
-        severity: 'CRITICAL',
-        category: 'spike',
-        reason: `Cost limit exceeded: Request cost $${estimatedCost.toFixed(4)} exceeds limit $${this.config.maxCostPerRequest.toFixed(2)}`,
+        severity: detectionResult.dangerScore >= 90 ? 'CRITICAL' : 'HIGH',
+        category: alertCategory,
+        reason: detectionResult.reason,
         estimatedLoss: savedAmount,
         suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
       });
       if (alert) console.log(alert);
 
-      this.logRequest(model, inputTokens, 0, estimatedCost, true, 100, 'Cost limit protection', textToAnalyze);
+      this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, textToAnalyze);
       return {
         success: false,
         blocked: true,
-        dangerScore: 100,
-        reason: `Cost limit exceeded`,
+        dangerScore: detectionResult.dangerScore,
+        reason: detectionResult.reason,
         estimatedCost,
         savedAmount,
-        killSwitchTriggered: true,
+        killSwitchTriggered: detectionResult.dangerScore >= 90,
       };
     }
 
-    const detectionResult = this.wasteDetector.detect(
-      model,
-      textToAnalyze,
-      estimatedCost,
-      context,
-      this.config.trustMode,
-      overrideBlock
-    );
-    
-    if (detectionResult.isDangerous && detectionResult.dangerScore >= this.config.dangerThreshold) {
-      if (detectionResult.action === 'block' && !overrideBlock) {
-        const alert = formatAlert({
-          severity: detectionResult.severity,
-          category: detectionResult.category,
-          reason: detectionResult.reason,
-          estimatedLoss: detectionResult.estimatedLoss,
-          suggestions: detectionResult.suggestions,
-        });
-        if (alert) console.log(alert);
-
-        this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, textToAnalyze);
-        
-        return {
-          success: false,
-          blocked: true,
-          dangerScore: detectionResult.dangerScore,
-          reason: detectionResult.reason,
-          suggestions: detectionResult.suggestions,
-          estimatedCost: detectionResult.estimatedLoss,
-          killSwitchTriggered: detectionResult.killSwitchTriggered,
-        };
-      } else {
-        console.log(`⚠️  Warning: ${detectionResult.reason} (danger score: ${detectionResult.dangerScore})`);
-      }
+    // Handle warning case
+    if (detectionResult.decision === 'warn') {
+      console.log(`⚠️  Warning: ${detectionResult.reason} (danger score: ${detectionResult.dangerScore})`);
     }
 
     try {
@@ -145,21 +142,21 @@ export class AIExecutionFirewall {
     }
   }
 
-  async callOpenAI(
-    apiCall: () => Promise<any>,
+  async callOpenAI<T = unknown>(
+    apiCall: () => Promise<T>,
     model: string,
-    messages: any[],
+    messages: ChatMessage[],
     overrideBlock?: boolean
-  ): Promise<AIResponse> {
+  ): Promise<AIResponse<T>> {
     return this.call(apiCall, { model, messages, overrideBlock });
   }
 
-  async callAnthropic(
-    apiCall: () => Promise<any>,
+  async callAnthropic<T = unknown>(
+    apiCall: () => Promise<T>,
     model: string,
-    messages: any[],
+    messages: ChatMessage[],
     overrideBlock?: boolean
-  ): Promise<AIResponse> {
+  ): Promise<AIResponse<T>> {
     return this.call(apiCall, { model, messages, overrideBlock });
   }
 
@@ -172,7 +169,12 @@ export class AIExecutionFirewall {
     dangerScore: number,
     reason: string,
     prompt: string,
-    decisionTrace?: any
+    decisionTrace?: {
+      category: string;
+      severity: string;
+      action: string;
+      killSwitchTriggered: boolean;
+    }
   ): void {
     const promptHash = createHash('sha256').update(prompt).digest('hex');
     const traceId = randomUUID();

@@ -3,8 +3,7 @@
  */
 
 import { ProxyServer } from '../proxy';
-import { sharedState } from '../core/SharedState';
-import { WasteDetector } from '../waste-detection/wasteDetector';
+import { detectionEngine } from '../core/DetectionEngine';
 import axios from 'axios';
 
 describe('ProxyServer', () => {
@@ -12,21 +11,21 @@ describe('ProxyServer', () => {
   const TEST_PORT = 3001;
 
   beforeAll(() => {
-    sharedState.reset();
+    detectionEngine.clear();
     server = new ProxyServer(TEST_PORT);
     server.start();
   });
 
   afterAll(() => {
     server.stop();
-    sharedState.reset();
+    detectionEngine.clear();
   });
 
   test('should start and respond to health check', async () => {
     const response = await axios.get(`http://localhost:${TEST_PORT}/health`);
     expect(response.status).toBe(200);
     expect(response.data.status).toBe('ok');
-    expect(response.data.wasteDetectorStats).toBeDefined();
+    expect(response.data.stats).toBeDefined();
   });
 
   test('should handle OpenAI-style requests', async () => {

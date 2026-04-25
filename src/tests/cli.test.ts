@@ -4,7 +4,7 @@
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { clearHistory } from '../cli/storage';
+import { detectionEngine } from '../core/DetectionEngine';
 
 const execAsync = promisify(exec);
 const TEST_TIMEOUT = 15000; // 15 seconds for file I/O operations
@@ -12,11 +12,11 @@ const TEST_TIMEOUT = 15000; // 15 seconds for file I/O operations
 describe('CLI Commands', () => {
   // Clear history before tests to ensure clean state
   beforeAll(() => {
-    clearHistory();
+    detectionEngine.clear();
   });
 
   afterAll(() => {
-    clearHistory();
+    detectionEngine.clear();
   });
 
   test('check command should validate safety and show output', async () => {
@@ -29,7 +29,7 @@ describe('CLI Commands', () => {
 
   test('check command should detect duplicates across multiple calls', async () => {
     // Clear history first
-    clearHistory();
+    detectionEngine.clear();
     
     // First call should be safe
     const result1 = await execAsync('node dist/cli/index.js check "duplicate test prompt" --model gpt-4');
@@ -43,7 +43,7 @@ describe('CLI Commands', () => {
 
   test('report command should show accumulated statistics', async () => {
     // Clear and add some requests
-    clearHistory();
+    detectionEngine.clear();
     
     // Add a few requests
     await execAsync('node dist/cli/index.js check "test1" --model gpt-4');

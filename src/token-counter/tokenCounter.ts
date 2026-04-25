@@ -3,6 +3,11 @@
  * Uses model-specific heuristics for better estimation
  */
 
+export interface ChatMessageContent {
+  role?: string;
+  content: string | Array<{type: string; text?: string}>;
+}
+
 /**
  * Estimate tokens for text using improved heuristics
  * Different models have different tokenization efficiency
@@ -68,7 +73,7 @@ function getModelOverhead(model?: string): number {
   }
 }
 
-export function estimateMessagesTokens(messages: any[], model?: string): number {
+export function estimateMessagesTokens(messages: ChatMessageContent[], model?: string): number {
   if (!messages || !Array.isArray(messages)) return 0;
   
   let totalTokens = 0;
@@ -78,7 +83,7 @@ export function estimateMessagesTokens(messages: any[], model?: string): number 
       totalTokens += estimateTokens(message.content, model);
     } else if (Array.isArray(message.content)) {
       for (const content of message.content) {
-        if (content.type === 'text') {
+        if (content.type === 'text' && content.text) {
           totalTokens += estimateTokens(content.text, model);
         }
       }

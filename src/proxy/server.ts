@@ -1,9 +1,9 @@
 import express, { Request, Response } from 'express';
 import axios, { AxiosRequestConfig } from 'axios';
-import { sharedState } from '../core/SharedState';
-import { WasteDetector } from '../waste-detection/wasteDetector';
+import { Server } from 'http';
+import { detectionEngine } from '../core/DetectionEngine';
 import { Logger, LogEntry } from '../logger';
-import { estimateTokens, estimateMessagesTokens } from '../token-counter';
+import { estimateTokens, estimateMessagesTokens, ChatMessageContent } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
 import { ConfigManager } from '../config';
 import { createHash, randomUUID } from 'crypto';
@@ -11,16 +11,14 @@ import { formatAlert } from '../utils/alert';
 
 export class ProxyServer {
   private app: express.Application;
-  private wasteDetector: WasteDetector;
   private logger: Logger;
   private config: ConfigManager;
   private port: number;
-  private server: any;
+  private server: Server | null = null;
   private rateLimitMap: Map<string, number[]>;
 
   constructor(port?: number) {
     this.app = express();
-    this.wasteDetector = sharedState.getWasteDetector();
     this.logger = new Logger();
     this.config = new ConfigManager();
     this.port = port || this.config.proxyPort;
@@ -85,7 +83,7 @@ export class ProxyServer {
 
     // Health check
     this.app.get('/health', (req: Request, res: Response) => {
-      res.json({ status: 'ok', wasteDetectorStats: this.wasteDetector.getStats() });
+      res.json({ status: 'ok', stats: detectionEngine.getStats() });
     });
   }
 
@@ -119,47 +117,51 @@ export class ProxyServer {
         return;
       }
 
-      // Detect danger
-      const detectionResult = this.wasteDetector.detect(
+      // Detect danger using unified DetectionEngine
+      const detectionResult = detectionEngine.analyze({
         model,
         prompt,
         estimatedCost,
-        undefined,
-        this.config.trustMode,
-        false
-      );
+        trustMode: this.config.trustMode,
+        override: false
+      });
       
-      if (detectionResult.isDangerous && detectionResult.dangerScore >= this.config.dangerThreshold) {
-        const message = detectionResult.killSwitchTriggered 
-          ? `🔴 KILL SWITCH: ${detectionResult.reason}. 💸 Prevented: $${detectionResult.estimatedLoss.toFixed(4)}`
-          : `Blocked request: ${detectionResult.reason}. Estimated loss: $${detectionResult.estimatedLoss.toFixed(4)}`;
+      if (detectionResult.decision === 'block') {
+        const isKillSwitch = detectionResult.dangerScore >= 90;
+        const message = isKillSwitch
+          ? `🔴 KILL SWITCH: ${detectionResult.reason}. 💸 Prevented: $${estimatedCost.toFixed(4)}`
+          : `Blocked request: ${detectionResult.reason}. Estimated loss: $${estimatedCost.toFixed(4)}`;
         
         this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, prompt, {
           category: detectionResult.category,
-          severity: detectionResult.severity,
-          action: detectionResult.action,
-          killSwitchTriggered: detectionResult.killSwitchTriggered,
+          severity: isKillSwitch ? 'CRITICAL' : 'HIGH',
+          action: 'block',
+          killSwitchTriggered: isKillSwitch,
         });
         
-        if (detectionResult.action === 'block') {
-          res.status(403).json({ 
-            error: message, 
-            blocked: true,
-            dangerScore: detectionResult.dangerScore,
-            killSwitchTriggered: detectionResult.killSwitchTriggered,
-            suggestions: detectionResult.suggestions
-          });
-          return;
-        } else {
-          const alert = formatAlert({
-            severity: detectionResult.severity,
-            category: detectionResult.category,
-            reason: detectionResult.reason,
-            estimatedLoss: detectionResult.estimatedLoss,
-            suggestions: detectionResult.suggestions,
-          });
-          if (alert) console.log(alert);
-        }
+        res.status(403).json({ 
+          error: message, 
+          blocked: true,
+          dangerScore: detectionResult.dangerScore,
+          killSwitchTriggered: isKillSwitch,
+          suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests']
+        });
+        return;
+      }
+
+      if (detectionResult.decision === 'warn') {
+        const alertCategory: 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'anomaly' =
+          detectionResult.category === 'safe' || detectionResult.category === 'invalid'
+            ? 'anomaly'
+            : detectionResult.category;
+        const alert = formatAlert({
+          severity: 'MEDIUM',
+          category: alertCategory,
+          reason: detectionResult.reason,
+          estimatedLoss: estimatedCost,
+          suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
+        });
+        if (alert) console.log(alert);
       }
 
       // Forward request
@@ -167,9 +169,9 @@ export class ProxyServer {
       
       // Log successful request
       this.logRequest(model, inputTokens, 0, estimatedCost, false, detectionResult.dangerScore, '', prompt, {
-        category: 'safe',
-        severity: 'SAFE',
-        action: 'allow',
+        category: detectionResult.decision === 'allow' ? 'safe' : detectionResult.category,
+        severity: detectionResult.dangerScore >= 50 ? 'MEDIUM' : 'SAFE',
+        action: detectionResult.decision,
         killSwitchTriggered: false,
       });
 
@@ -210,47 +212,51 @@ export class ProxyServer {
         return;
       }
 
-      // Detect danger
-      const detectionResult = this.wasteDetector.detect(
+      // Detect danger using unified DetectionEngine
+      const detectionResult = detectionEngine.analyze({
         model,
         prompt,
         estimatedCost,
-        undefined,
-        this.config.trustMode,
-        false
-      );
+        trustMode: this.config.trustMode,
+        override: false
+      });
       
-      if (detectionResult.isDangerous && detectionResult.dangerScore >= this.config.dangerThreshold) {
-        const message = detectionResult.killSwitchTriggered 
-          ? `🔴 KILL SWITCH: ${detectionResult.reason}. 💸 Prevented: $${detectionResult.estimatedLoss.toFixed(4)}`
-          : `Blocked request: ${detectionResult.reason}. Estimated loss: $${detectionResult.estimatedLoss.toFixed(4)}`;
+      if (detectionResult.decision === 'block') {
+        const isKillSwitch = detectionResult.dangerScore >= 90;
+        const message = isKillSwitch
+          ? `🔴 KILL SWITCH: ${detectionResult.reason}. 💸 Prevented: $${estimatedCost.toFixed(4)}`
+          : `Blocked request: ${detectionResult.reason}. Estimated loss: $${estimatedCost.toFixed(4)}`;
         
         this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, prompt, {
           category: detectionResult.category,
-          severity: detectionResult.severity,
-          action: detectionResult.action,
-          killSwitchTriggered: detectionResult.killSwitchTriggered,
+          severity: isKillSwitch ? 'CRITICAL' : 'HIGH',
+          action: 'block',
+          killSwitchTriggered: isKillSwitch,
         });
         
-        if (detectionResult.action === 'block') {
-          res.status(403).json({ 
-            error: message, 
-            blocked: true,
-            dangerScore: detectionResult.dangerScore,
-            killSwitchTriggered: detectionResult.killSwitchTriggered,
-            suggestions: detectionResult.suggestions
-          });
-          return;
-        } else {
-          const alert = formatAlert({
-            severity: detectionResult.severity,
-            category: detectionResult.category,
-            reason: detectionResult.reason,
-            estimatedLoss: detectionResult.estimatedLoss,
-            suggestions: detectionResult.suggestions,
-          });
-          if (alert) console.log(alert);
-        }
+        res.status(403).json({ 
+          error: message, 
+          blocked: true,
+          dangerScore: detectionResult.dangerScore,
+          killSwitchTriggered: isKillSwitch,
+          suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests']
+        });
+        return;
+      }
+
+      if (detectionResult.decision === 'warn') {
+        const alertCategory: 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'anomaly' =
+          detectionResult.category === 'safe' || detectionResult.category === 'invalid'
+            ? 'anomaly'
+            : detectionResult.category;
+        const alert = formatAlert({
+          severity: 'MEDIUM',
+          category: alertCategory,
+          reason: detectionResult.reason,
+          estimatedLoss: estimatedCost,
+          suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
+        });
+        if (alert) console.log(alert);
       }
 
       // Forward request
@@ -258,15 +264,15 @@ export class ProxyServer {
       
       // Log successful request
       this.logRequest(model, inputTokens, 0, estimatedCost, false, detectionResult.dangerScore, '', prompt, {
-        category: 'safe',
-        severity: 'SAFE',
-        action: 'allow',
+        category: detectionResult.decision === 'allow' ? 'safe' : detectionResult.category,
+        severity: detectionResult.dangerScore >= 50 ? 'MEDIUM' : 'SAFE',
+        action: detectionResult.decision,
         killSwitchTriggered: false,
       });
 
-    } catch (error: any) {
-      console.error('Error handling Anthropic request:', error.message);
-      res.status(500).json({ error: 'Internal server error', message: error.message });
+    } catch (error) {
+      console.error('Error handling Anthropic request:', error);
+      res.status(500).json({ error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
@@ -419,9 +425,7 @@ export class ProxyServer {
   stop(): void {
     if (this.server) {
       this.server.close(() => {
-    this.wasteDetector.destroy();
         console.log('\n🛡️  AI Execution Firewall stopped gracefully');
-        this.wasteDetector.destroy();
       });
     }
   }
