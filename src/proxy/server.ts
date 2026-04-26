@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import axios, { AxiosRequestConfig } from 'axios';
 import { Server } from 'http';
 import { detectionEngine } from '../core/DetectionEngine';
-import { Logger, LogEntry } from '../logger';
+import { Logger, LogEntry, logger } from '../logger';
 import { estimateTokens, estimateMessagesTokens, ChatMessageContent } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
 import { ConfigManager } from '../config';
@@ -11,15 +11,16 @@ import { formatAlert } from '../utils/alert';
 
 export class ProxyServer {
   private app: express.Application;
-  private logger: Logger;
+  private dbLogger: Logger;
   private config: ConfigManager;
   private port: number;
   private server: Server | null = null;
   private rateLimitMap: Map<string, number[]>;
+  public readonly maxRetries = 3;
 
   constructor(port?: number) {
     this.app = express();
-    this.logger = new Logger();
+    this.dbLogger = new Logger();
     this.config = new ConfigManager();
     this.port = port || this.config.proxyPort;
     this.rateLimitMap = new Map<string, number[]>();
@@ -29,9 +30,15 @@ export class ProxyServer {
   }
 
   private setupMiddleware(): void {
+    // Body parsing - needed for all routes
     this.app.use(express.json({ limit: '10mb' }));
     
-    // Rate limiting middleware
+    // Health check - bypasses all other middleware
+    this.app.get('/health', (req: Request, res: Response) => {
+      res.json({ status: 'ok', stats: detectionEngine.getStats(1) });
+    });
+    
+    // Rate limiting middleware (excludes health)
     this.app.use((req, res, next) => {
       const clientIp = req.ip || 'unknown';
       const now = Date.now();
@@ -65,25 +72,25 @@ export class ProxyServer {
     
     // Request logging
     this.app.use((req, res, next) => {
-      console.log(`${req.method} ${req.path}`);
+      logger.log(`${req.method} ${req.path}`);
       next();
     });
   }
 
   private setupRoutes(): void {
-    // Anthropic proxy endpoint (MUST be first - more specific)
-    this.app.all('/v1/messages', async (req: Request, res: Response) => {
+    // Anthropic proxy endpoint - explicit POST
+    this.app.post('/v1/messages', async (req: Request, res: Response) => {
       await this.handleAnthropicRequest(req, res);
     });
 
-    // OpenAI proxy endpoint (catches everything else under /v1/)
-    this.app.all('/v1/*', async (req: Request, res: Response) => {
+    // OpenAI proxy endpoint - explicit POST for chat completions
+    this.app.post('/v1/chat/completions', async (req: Request, res: Response) => {
       await this.handleOpenAIRequest(req, res);
     });
 
-    // Health check
-    this.app.get('/health', (req: Request, res: Response) => {
-      res.json({ status: 'ok', stats: detectionEngine.getStats() });
+    // Fallback for other /v1/* routes
+    this.app.all('/v1/*', async (req: Request, res: Response) => {
+      await this.handleOpenAIRequest(req, res);
     });
   }
 
@@ -97,7 +104,7 @@ export class ProxyServer {
       const inputTokens = estimateMessagesTokens(messages);
       const pricing = getModelPricing(model);
       if (!pricing) {
-        console.warn(`Unknown model: ${model}, allowing request`);
+        logger.warn(`Unknown model: ${model}, allowing request`);
         await this.forwardRequest(req, res, 'https://api.openai.com');
         return;
       }
@@ -125,22 +132,22 @@ export class ProxyServer {
         trustMode: this.config.trustMode,
         override: false
       });
-      
+
       if (detectionResult.decision === 'block') {
         const isKillSwitch = detectionResult.dangerScore >= 90;
         const message = isKillSwitch
           ? `🔴 KILL SWITCH: ${detectionResult.reason}. 💸 Prevented: $${estimatedCost.toFixed(4)}`
           : `Blocked request: ${detectionResult.reason}. Estimated loss: $${estimatedCost.toFixed(4)}`;
-        
+
         this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, prompt, {
           category: detectionResult.category,
           severity: isKillSwitch ? 'CRITICAL' : 'HIGH',
           action: 'block',
           killSwitchTriggered: isKillSwitch,
         });
-        
-        res.status(403).json({ 
-          error: message, 
+
+        res.status(403).json({
+          error: message,
           blocked: true,
           dangerScore: detectionResult.dangerScore,
           killSwitchTriggered: isKillSwitch,
@@ -161,12 +168,12 @@ export class ProxyServer {
           estimatedLoss: estimatedCost,
           suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
         });
-        if (alert) console.log(alert);
+        if (alert) logger.log(alert);
       }
 
       // Forward request
       await this.forwardRequest(req, res, 'https://api.openai.com');
-      
+
       // Log successful request
       this.logRequest(model, inputTokens, 0, estimatedCost, false, detectionResult.dangerScore, '', prompt, {
         category: detectionResult.decision === 'allow' ? 'safe' : detectionResult.category,
@@ -176,7 +183,7 @@ export class ProxyServer {
       });
 
     } catch (error) {
-      console.error('Error handling OpenAI request:', error);
+      logger.error('Error handling OpenAI request:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }
@@ -192,7 +199,7 @@ export class ProxyServer {
       const inputTokens = estimateMessagesTokens(messages, model);
       const pricing = getModelPricing(model);
       if (!pricing) {
-        console.warn(`Unknown model: ${model}, allowing request`);
+        logger.warn(`Unknown model: ${model}, allowing request`);
         await this.forwardRequest(req, res, 'https://api.anthropic.com');
         return;
       }
@@ -256,7 +263,7 @@ export class ProxyServer {
           estimatedLoss: estimatedCost,
           suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
         });
-        if (alert) console.log(alert);
+        if (alert) logger.log(alert);
       }
 
       // Forward request
@@ -271,13 +278,13 @@ export class ProxyServer {
       });
 
     } catch (error) {
-      console.error('Error handling Anthropic request:', error);
+      logger.error('Error handling Anthropic request:', error);
       res.status(500).json({ error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
   private async forwardRequest(req: Request, res: Response, baseUrl: string): Promise<void> {
-    // Forward all headers except hop-by-hop headers
+    // Forward all headers except hop-by-hop headers and Content-Type (let res.json() set it)
     const hopByHopHeaders = [
       'host',
       'connection',
@@ -288,6 +295,7 @@ export class ProxyServer {
       'upgrade',
       'proxy-authorization',
       'proxy-authenticate',
+      'content-type',
     ];
     
     const headers: Record<string, string> = {};
@@ -401,32 +409,44 @@ export class ProxyServer {
       decisionTrace,
     };
 
-    this.logger.log(entry);
+    this.dbLogger.log(entry);
 
     if (wasBlocked) {
-      console.log(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
+      logger.log(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
     }
   }
 
-  start(): void {
-    this.server = this.app.listen(this.port, () => {
-      console.log(`\n🛡️  AI EXECUTION FIREWALL running on port ${this.port}`);
-      console.log(`🚨 Danger Blocking: ${this.config.trustMode === 'block' ? 'ACTIVE' : this.config.trustMode === 'warn' ? 'WARN' : 'MONITOR'}`);
-      console.log(`💰 Max cost per request: $${this.config.maxCostPerRequest.toFixed(2)}`);
-      console.log(`⚠️  Danger threshold: ${this.config.dangerThreshold}%`);
-      console.log(`\nConfigure your AI SDK to use: http://localhost:${this.port}\n`);
-    });
-
-    // Handle graceful shutdown
-    process.on('SIGTERM', () => this.stop());
-    process.on('SIGINT', () => this.stop());
-  }
-
-  stop(): void {
-    if (this.server) {
-      this.server.close(() => {
-        console.log('\n🛡️  AI Execution Firewall stopped gracefully');
+  start(): Promise<void> {
+    return new Promise((resolve) => {
+      this.server = this.app.listen(this.port, () => {
+        logger.log(`\n🛡️  AI EXECUTION FIREWALL running on port ${this.port}`);
+        logger.log(`🚨 Danger Blocking: ${this.config.trustMode === 'block' ? 'ACTIVE' : this.config.trustMode === 'warn' ? 'WARN' : 'MONITOR'}`);
+        logger.log(`💰 Max cost per request: $${this.config.maxCostPerRequest.toFixed(2)}`);
+        logger.log(`⚠️  Danger threshold: ${this.config.dangerThreshold}%`);
+        logger.log(`\nConfigure your AI SDK to use: http://localhost:${this.port}\n`);
+        resolve();
       });
-    }
+
+      // Handle graceful shutdown
+      process.on('SIGTERM', () => this.stop());
+      process.on('SIGINT', () => this.stop());
+    });
+  }
+
+  stop(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.server) {
+        this.server.close(() => {
+          resolve();
+        });
+      } else {
+        resolve();
+      }
+    });
+  }
+
+  // Clear rate limit map for testing
+  clearRateLimits(): void {
+    this.rateLimitMap.clear();
   }
 }

@@ -219,11 +219,23 @@ export class StateStore {
   }
 
   /**
-   * Reset for testing
+   * Reload state from disk (for testing)
+   */
+  reload(): void {
+    this.cache.clear();
+    this.initialized = false;
+    this.initialize();
+  }
+
+  /**
+   * Reset for testing - fully restore initial state
    */
   reset(): void {
     this.cache.clear();
     this.initialized = false;
+    if (fs.existsSync(HISTORY_FILE)) {
+      fs.unlinkSync(HISTORY_FILE);
+    }
     this.initialize();
   }
 }

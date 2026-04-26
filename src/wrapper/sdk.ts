@@ -9,7 +9,7 @@
  */
 
 import { detectionEngine } from '../core/DetectionEngine';
-import { Logger, LogEntry } from '../logger';
+import { Logger, LogEntry, logger } from '../logger';
 import { estimateTokens, estimateMessagesTokens } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
 import { ConfigManager } from '../config';
@@ -64,7 +64,7 @@ export class AIExecutionFirewall {
     
     const pricing = getModelPricing(model);
     if (!pricing) {
-      console.warn(`⚠️  Unknown model: ${model}, allowing request`);
+      logger.warn(`⚠️  Unknown model: ${model}, allowing request`);
       const data = await apiCall();
       return { success: true, data };
     }
@@ -96,7 +96,7 @@ export class AIExecutionFirewall {
         estimatedLoss: savedAmount,
         suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
       });
-      if (alert) console.log(alert);
+      if (alert) logger.log(alert);
 
       this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, textToAnalyze);
       return {
@@ -112,7 +112,7 @@ export class AIExecutionFirewall {
 
     // Handle warning case
     if (detectionResult.decision === 'warn') {
-      console.log(`⚠️  Warning: ${detectionResult.reason} (danger score: ${detectionResult.dangerScore})`);
+      logger.log(`⚠️  Warning: ${detectionResult.reason} (danger score: ${detectionResult.dangerScore})`);
     }
 
     try {
@@ -126,6 +126,7 @@ export class AIExecutionFirewall {
       
       return {
         success: true,
+        blocked: false,
         data: result,
         dangerScore: detectionResult.dangerScore,
         estimatedCost,
@@ -196,7 +197,7 @@ export class AIExecutionFirewall {
     this.logger.log(entry);
 
     if (wasBlocked) {
-      console.log(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
+      logger.log(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
     }
   }
 

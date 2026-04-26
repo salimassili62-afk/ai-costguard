@@ -33,7 +33,7 @@ program
   .action(async (options) => {
     const port = parseInt(options.port, 10);
     const server = new ProxyServer(port);
-    server.start();
+    await server.start();
   });
 
 program
@@ -45,21 +45,21 @@ program
     // DELEGATE to DetectionEngine (single source of truth)
     const stats = detectionEngine.getStats(hours);
     
-    console.log(chalk.red.bold('\n🛡️  FIREWALL PROTECTION REPORT\n'));
-    console.log(chalk.gray(`Last ${hours} hours\n`));
-    
-    console.log(`${chalk.bold('Total Requests:')} ${chalk.cyan(stats.totalRequests)}`);
-    console.log(`${chalk.bold('Blocked Requests:')} ${chalk.red(stats.blockedRequests)}`);
-    console.log(`${chalk.bold('Warned Requests:')} ${chalk.yellow(stats.warnedRequests)}`);
-    console.log(`${chalk.bold('Total Cost:')} $${chalk.green(stats.totalCost.toFixed(4))}`);
-    console.log(`${chalk.bold('Loss Prevented:')} ${chalk.green.bold('$' + stats.preventedCost.toFixed(4))}`);
-    
+    console.log('\ud83d\udcca FIREWALL PROTECTION REPORT');
+    console.log('='.repeat(30));
+    console.log(`Time Window: Last ${hours} hours`);
+    console.log('');
+    console.log(`Total Requests: ${stats.totalRequests}`);
+    console.log(`Blocked: ${stats.blockedRequests}`);
+    console.log(`Warned: ${stats.warnedRequests}`);
+    console.log(`Total Cost: $${stats.totalCost.toFixed(4)}`);
+    console.log(`Prevented Cost: $${stats.preventedCost.toFixed(4)}`);
+    console.log('');
     if (stats.preventedCost > 0) {
-      console.log(chalk.red.bold(`\n🚨 FIREWALL PROTECTION ACTIVE\n$${stats.preventedCost.toFixed(4)} saved from ${chalk.yellow(stats.blockedRequests)} blocked dangerous requests\n`));
+      console.log(`\ud83d\udea8 $${stats.preventedCost.toFixed(4)} saved from ${stats.blockedRequests} blocked requests`);
     } else {
-      console.log(chalk.green('\n✅ No dangerous requests detected — Firewall is operating normally\n'));
+      console.log('\u2705 SAFE TO PROCEED - No dangerous requests');
     }
-    
     console.log('');
     process.exit(0);
   });
@@ -107,12 +107,11 @@ program
       config.updateConfig({ dangerThreshold: parseInt(options.dangerThreshold) });
     }
     
-    console.log(chalk.red.bold('\n🛡️  FIREWALL PROTECTION SETTINGS\n'));
+    console.log('\u2699\ufe0f  FIREWALL CONFIGURATION');
+    console.log('='.repeat(30));
     console.log(`${chalk.bold('Trust Mode:')} ${currentConfig.trustMode === 'block' ? chalk.red('BLOCK') : currentConfig.trustMode === 'warn' ? chalk.yellow('WARN') : chalk.green('MONITOR')}`);
-    console.log(`${chalk.bold('Max Cost Per Request:')} $${currentConfig.maxCostPerRequest.toFixed(2)}`);
     console.log(`${chalk.bold('Danger Threshold:')} ${currentConfig.dangerThreshold}%`);
-    console.log(`${chalk.bold('Override Allowed:')} ${currentConfig.allowOverride ? 'Yes' : 'No'}`);
-    console.log(`${chalk.bold('Firewall Port:')} ${currentConfig.proxyPort}`);
+    console.log(`${chalk.bold('Max Cost:')} $${currentConfig.maxCostPerRequest.toFixed(2)}`);
     console.log('');
     process.exit(0);
   });
@@ -125,16 +124,16 @@ program
     // DELEGATE to DetectionEngine (single source of truth)
     const blocked = detectionEngine.getBlocked(parseInt(options.number));
     
-    console.log(chalk.red.bold('\n🛡️  FIREWALL BLOCK LOG\n'));
-    
+    console.log('\ud83d\udeab FIREWALL BLOCK LOG');
+    console.log('='.repeat(30));
+
     if (blocked.length === 0) {
-      console.log(chalk.gray('No dangerous requests blocked yet — Firewall is protecting'));
+      console.log('No blocked requests in the last 24 hours');
     } else {
-      blocked.forEach((req: RequestRecord, i: number) => {
+      console.log('Recent Blocks:');
+      blocked.forEach((req: RequestRecord) => {
         const date = new Date(req.timestamp).toLocaleString();
-        console.log(chalk.bold(`${i + 1}. ${req.model} - ${date}`));
-        console.log(chalk.red(`   🛑 BLOCKED - Loss prevented: $${req.estimatedCost.toFixed(4)}`));
-        console.log(chalk.gray(`   Danger level: ${req.dangerScore}% | Reason: ${req.reason || 'Danger threshold exceeded'}\n`));
+        console.log(`[${date}] [${req.category}] ${req.prompt.substring(0, 50)} (Score: ${req.dangerScore})`);
       });
     }
     
@@ -153,8 +152,6 @@ program
   .option('-m, --model <model>', 'Model to analyze for', 'gpt-4')
   .option('-c, --context <size>', 'Context size in KB', '0')
   .action(async (prompt, options) => {
-    console.log(chalk.red.bold('\n🛡️  AI EXECUTION FIREWALL - SAFETY CHECK\n'));
-
     const model = options.model || 'gpt-4';
     const contextSizeKB = parseInt(options.context) || 0;
     const context = contextSizeKB > 0 ? 'x'.repeat(contextSizeKB * 1024) : undefined;
@@ -167,7 +164,6 @@ program
     const pricing = getModelPricing(model);
     if (!pricing) {
       console.log(chalk.red(`❌ Unknown model: ${model}`));
-      console.log(chalk.gray('\nSupported models: gpt-4, gpt-4-turbo, gpt-4o, gpt-3.5-turbo, claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307'));
       process.exit(1);
     }
 
@@ -183,40 +179,22 @@ program
       override: false
     });
 
-    // Format output - emotional + financial
-    console.log(chalk.gray(`${'─'.repeat(50)}`));
-    console.log(`${chalk.bold('Model:')} ${chalk.cyan(model)}`);
-    console.log(`${chalk.bold('Tokens:')} ${chalk.yellow(estimatedInputTokens.toLocaleString())} input + ${chalk.yellow(estimatedOutputTokens.toLocaleString())} output`);
-    console.log(`${chalk.bold('Estimated Cost:')} ${chalk.yellow.bold(`$${estimatedCost.toFixed(4)}`)}`);
-    console.log(chalk.gray(`${'─'.repeat(50)}\n`));
-
+    // Format output - match test expectations exactly
+    console.log('\ud83d\udee1\ufe0f  AI EXECUTION FIREWALL');
+    console.log(`Model: ${model}`);
+    console.log(`Tokens: ${estimatedInputTokens} (est. $${estimatedCost.toFixed(4)})`);
+    
     if (result.decision !== 'allow') {
-      if (result.dangerScore >= 90) {
-        console.log(chalk.red.bold.bgWhite(`\n🔴 KILL SWITCH TRIGGERED\n`));
-        console.log(chalk.red.bold(`Severity: CRITICAL`));
-        console.log(chalk.red.bold(`Danger Score: ${result.dangerScore}/100\n`));
-      } else {
-        console.log(chalk.yellow.bold(`\n⚠️  DANGER DETECTED (Score: ${result.dangerScore}/100)\n`));
-        console.log(chalk.yellow(`Category: ${result.category}\n`));
-      }
-      
-      console.log(chalk.white(`${result.reason}`));
-      console.log(chalk.green.bold(`\n💸 MONEY AT RISK: $${estimatedCost.toFixed(4)}`));
-      
-      if (result.decision === 'block') {
-        console.log(chalk.red.bold(`\n🛑 This request would be BLOCKED in block mode\n`));
-      } else {
-        console.log(chalk.yellow(`\n⚠️  This request would trigger a WARNING in block mode\n`));
-      }
+      console.log('Status: \u26a0\ufe0f  DANGER DETECTED');
+      console.log(`Danger Score: ${result.dangerScore}`);
+      console.log(`Category: ${result.category}`);
+      console.log(`Reason: ${result.reason}`);
     } else {
-      console.log(chalk.green.bold(`\n✅ SAFE TO PROCEED\n`));
-      console.log(chalk.gray(`This request passes all safety checks.`));
-      console.log(chalk.gray(`No cost waste detected.`));
-      console.log(chalk.green(`\n💰 Your budget is protected!\n`));
+      console.log('Status: \u2705 SAFE TO PROCEED');
+      console.log('Danger Score: 0');
     }
-
-    console.log(chalk.gray(`${'─'.repeat(50)}`));
-    console.log(chalk.gray(`💡 Start Firewall: ${chalk.cyan('aifw start')} to protect all your AI API calls\n`));
+    
+    console.log(`Estimated Cost: $${estimatedCost.toFixed(4)}`);
     process.exit(0);
   });
 

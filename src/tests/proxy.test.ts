@@ -10,14 +10,14 @@ describe('ProxyServer', () => {
   let server: ProxyServer;
   const TEST_PORT = 3001;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     detectionEngine.clear();
     server = new ProxyServer(TEST_PORT);
-    server.start();
+    await server.start();
   });
 
-  afterAll(() => {
-    server.stop();
+  afterAll(async () => {
+    await server.stop();
     detectionEngine.clear();
   });
 

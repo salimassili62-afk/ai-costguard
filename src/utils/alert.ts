@@ -40,8 +40,8 @@ export function formatAlert(data: AlertData): string {
     spike: chalk.red,
     anomaly: chalk.blue,
   };
-  
-  output += `${categoryColors[category] || chalk.white}Category: ${category.toUpperCase()}\n`;
+
+  output += (categoryColors[category] || chalk.white)(`Category: ${category.toUpperCase()}\n`);
   output += chalk.white(`Reason: ${reason}\n`);
   output += chalk.yellow(`💸 Potential loss: $${estimatedLoss.toFixed(4)}\n`);
   

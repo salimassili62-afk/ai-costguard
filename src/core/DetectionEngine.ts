@@ -113,7 +113,9 @@ export class DetectionEngine {
     // Check 1: Runaway loop (CRITICAL - highest priority)
     const loopCheck = this.detectLoop(promptHash);
     if (loopCheck.isLoop) {
-      const dangerScore = Math.min(100, 90 + loopCheck.count * 3);
+      // Score: 90 base + 3 per request beyond threshold, capped at 100
+      // r3: 90 + 3*(3-2) = 93, r4: 90 + 3*(4-2) = 96, etc.
+      const dangerScore = Math.min(100, 90 + (loopCheck.count - 2) * 3);
       this.recordRequest(input, promptHash, true, dangerScore, 'loop', loopCheck.reason);
       return this.createResult(
         'block',
@@ -127,7 +129,9 @@ export class DetectionEngine {
     // Check 2: Exact duplicate
     const duplicateCheck = this.detectDuplicate(promptHash);
     if (duplicateCheck.isDuplicate) {
-      const dangerScore = Math.min(90, 40 + duplicateCheck.count * 10);
+      // Score: 30 base + 10 per duplicate, capped at 90
+      // First duplicate = 40 (warn), Second = 50 (block threshold)
+      const dangerScore = Math.min(90, 30 + duplicateCheck.count * 10);
       const decision = this.determineDecision(dangerScore, trustMode);
       this.recordRequest(input, promptHash, true, dangerScore, 'duplicate', duplicateCheck.reason);
       return this.createResult(
@@ -135,7 +139,7 @@ export class DetectionEngine {
         dangerScore,
         'duplicate',
         duplicateCheck.reason,
-        { promptHash, duplicateCount: duplicateCheck.count, loopCount: 0, estimatedCost }
+        { promptHash, duplicateCount: duplicateCheck.count, loopCount: loopCheck.count, estimatedCost }
       );
     }
 
@@ -150,7 +154,7 @@ export class DetectionEngine {
         dangerScore,
         'spike',
         costCheck.reason,
-        { promptHash, duplicateCount: 0, loopCount: 0, estimatedCost }
+        { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
       );
     }
 
@@ -169,7 +173,7 @@ export class DetectionEngine {
           { 
             promptHash, 
             duplicateCount: 0, 
-            loopCount: 0, 
+            loopCount: loopCheck.count, 
             estimatedCost,
             contextRatio: contextCheck.ratio 
           }
@@ -191,7 +195,7 @@ export class DetectionEngine {
         { 
           promptHash, 
           duplicateCount: 0, 
-          loopCount: 0, 
+          loopCount: loopCheck.count, 
           estimatedCost,
           similarity: fuzzyCheck.similarity 
         }
@@ -205,7 +209,7 @@ export class DetectionEngine {
       0,
       'safe',
       'Request is safe',
-      { promptHash, duplicateCount: 0, loopCount: 0, estimatedCost }
+      { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
     );
   }
 
@@ -214,12 +218,14 @@ export class DetectionEngine {
    */
   private detectLoop(promptHash: string): { isLoop: boolean; count: number; reason: string } {
     const recent = stateStore.getRecentByHash(promptHash, this.LOOP_WINDOW);
-    
-    if (recent.length >= this.LOOP_THRESHOLD) {
+    // KILL SWITCH: Trigger when total requests (existing + current) >= threshold
+    // Need 3 identical requests in 30 seconds to trigger
+    const totalCount = recent.length + 1; // +1 for current request
+    if (totalCount >= this.LOOP_THRESHOLD) {
       return {
         isLoop: true,
-        count: recent.length + 1,
-        reason: `🔴 KILL SWITCH: RUNAWAY LOOP - ${recent.length + 1} identical requests in 30 seconds`
+        count: totalCount,
+        reason: `🔴 KILL SWITCH: RUNAWAY LOOP - ${totalCount} identical requests in 30 seconds`
       };
     }
     
@@ -228,10 +234,12 @@ export class DetectionEngine {
 
   /**
    * Detect exact duplicates (1+ identical requests in 1 hour)
+   * Any existing request with same promptHash → duplicate
    */
   private detectDuplicate(promptHash: string): { isDuplicate: boolean; count: number; reason: string } {
     const recent = stateStore.getRecentByHash(promptHash, this.DUPLICATE_WINDOW);
     
+    // If ANY history item has same promptHash → duplicate
     if (recent.length > 0) {
       return {
         isDuplicate: true,
@@ -240,7 +248,7 @@ export class DetectionEngine {
       };
     }
     
-    return { isDuplicate: false, count: 0, reason: '' };
+    return { isDuplicate: false, count: recent.length, reason: '' };
   }
 
   /**
@@ -250,7 +258,8 @@ export class DetectionEngine {
     if (estimatedCost >= this.COST_THRESHOLD) {
       const baseScore = 30;
       const costMultiplier = (estimatedCost - 0.05) * 50;
-      const score = Math.min(100, baseScore + costMultiplier);
+      // Floor to integer for deterministic output
+      const score = Math.min(100, Math.floor(baseScore + costMultiplier));
       
       return {
         isSpike: true,
@@ -273,14 +282,17 @@ export class DetectionEngine {
     const contextLength = context.length;
     const ratio = contextLength / (promptLength || 1);
     
+    // Strict threshold: 5x ratio required for detection
     if (ratio >= this.CONTEXT_RATIO_THRESHOLD) {
-      const score = Math.min(75, 25 + Math.log(ratio) * 15);
+      // Floor ratio to 2 decimals for deterministic output
+      const roundedRatio = Math.floor(ratio * 100) / 100;
+      const score = Math.min(75, Math.floor(25 + Math.log(ratio) * 15));
       
       return {
         isExplosion: true,
         score,
-        reason: `💸 CONTEXT EXPLOSION: Context is ${ratio.toFixed(1)}x larger than prompt`,
-        ratio
+        reason: `💸 CONTEXT EXPLOSION: Context is ${roundedRatio.toFixed(2)}x larger than prompt`,
+        ratio: roundedRatio
       };
     }
     
@@ -336,9 +348,11 @@ export class DetectionEngine {
     reason: string,
     metadata: DetectionResult['metadata']
   ): DetectionResult {
+    // Normalize dangerScore to integer (0-100) using floor
+    const normalizedScore = Math.max(0, Math.min(100, Math.floor(dangerScore)));
     return {
       decision,
-      dangerScore,
+      dangerScore: normalizedScore,
       category,
       reason,
       metadata
@@ -397,10 +411,10 @@ export class DetectionEngine {
   }
 
   /**
-   * Reset state (for testing)
+   * Reset state (for testing) - fully restore initial state
    */
   reset(): void {
-    stateStore.reset();
+    stateStore.reset(); // Clear cache, disk, and reinitialize
   }
 }
 

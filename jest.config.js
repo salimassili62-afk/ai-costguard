@@ -11,4 +11,6 @@ module.exports = {
     '!src/**/*.d.ts',
     '!src/tests/**',
   ],
+  maxWorkers: 1, // Run tests serially to avoid shared state conflicts
+  setupFiles: ['<rootDir>/jest.setup.js'],
 };
