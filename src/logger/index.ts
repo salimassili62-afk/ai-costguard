@@ -1,2 +1,2 @@
-export * from './database';
-export { logger } from './console';
+export { Logger, LogEntry } from './database';
+export { logger, Logger as ConsoleLogger, LogLevel, createSilentLogger, createDebugLogger } from './console';

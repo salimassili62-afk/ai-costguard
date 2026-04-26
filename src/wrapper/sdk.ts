@@ -96,7 +96,7 @@ export class AIExecutionFirewall {
         estimatedLoss: savedAmount,
         suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
       });
-      if (alert) logger.log(alert);
+      if (alert) logger.info(alert);
 
       this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, textToAnalyze);
       return {
@@ -112,7 +112,7 @@ export class AIExecutionFirewall {
 
     // Handle warning case
     if (detectionResult.decision === 'warn') {
-      logger.log(`⚠️  Warning: ${detectionResult.reason} (danger score: ${detectionResult.dangerScore})`);
+      logger.info(`⚠️  Warning: ${detectionResult.reason} (danger score: ${detectionResult.dangerScore})`);
     }
 
     try {
@@ -197,7 +197,7 @@ export class AIExecutionFirewall {
     this.logger.log(entry);
 
     if (wasBlocked) {
-      logger.log(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
+      logger.info(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
     }
   }
 

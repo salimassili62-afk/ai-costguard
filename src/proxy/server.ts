@@ -72,7 +72,7 @@ export class ProxyServer {
     
     // Request logging
     this.app.use((req, res, next) => {
-      logger.log(`${req.method} ${req.path}`);
+      logger.info(`${req.method} ${req.path}`);
       next();
     });
   }
@@ -168,7 +168,7 @@ export class ProxyServer {
           estimatedLoss: estimatedCost,
           suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
         });
-        if (alert) logger.log(alert);
+        if (alert) logger.info(alert);
       }
 
       // Forward request
@@ -263,7 +263,7 @@ export class ProxyServer {
           estimatedLoss: estimatedCost,
           suggestions: ['Use a cheaper model', 'Reduce token count', 'Split into smaller requests'],
         });
-        if (alert) logger.log(alert);
+        if (alert) logger.info(alert);
       }
 
       // Forward request
@@ -412,18 +412,18 @@ export class ProxyServer {
     this.dbLogger.log(entry);
 
     if (wasBlocked) {
-      logger.log(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
+      logger.info(`🔴 BLOCKED by Firewall: ${reason} (danger score: ${dangerScore}) [trace: ${traceId}]`);
     }
   }
 
   start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = this.app.listen(this.port, () => {
-        logger.log(`\n🛡️  AI EXECUTION FIREWALL running on port ${this.port}`);
-        logger.log(`🚨 Danger Blocking: ${this.config.trustMode === 'block' ? 'ACTIVE' : this.config.trustMode === 'warn' ? 'WARN' : 'MONITOR'}`);
-        logger.log(`💰 Max cost per request: $${this.config.maxCostPerRequest.toFixed(2)}`);
-        logger.log(`⚠️  Danger threshold: ${this.config.dangerThreshold}%`);
-        logger.log(`\nConfigure your AI SDK to use: http://localhost:${this.port}\n`);
+        logger.info(`\n🛡️  AI EXECUTION FIREWALL running on port ${this.port}`);
+        logger.info(`🚨 Danger Blocking: ${this.config.trustMode === 'block' ? 'ACTIVE' : this.config.trustMode === 'warn' ? 'WARN' : 'MONITOR'}`);
+        logger.info(`💰 Max cost per request: $${this.config.maxCostPerRequest.toFixed(2)}`);
+        logger.info(`⚠️  Danger threshold: ${this.config.dangerThreshold}%`);
+        logger.info(`\nConfigure your AI SDK to use: http://localhost:${this.port}\n`);
         resolve();
       });
 
@@ -448,5 +448,12 @@ export class ProxyServer {
   // Clear rate limit map for testing
   clearRateLimits(): void {
     this.rateLimitMap.clear();
+  }
+
+  /**
+   * Check if the server is currently listening
+   */
+  isListening(): boolean {
+    return this.server !== null && this.server.listening;
   }
 }

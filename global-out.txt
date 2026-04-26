@@ -1,0 +1,11 @@
+🚀 Starting AI Execution Firewall on port 3472...
+
+🛡️  AI EXECUTION FIREWALL running on port 3472
+🚨 Danger Blocking: WARN
+💰 Max cost per request: $1.00
+⚠️  Danger threshold: 50%
+
+Configure your AI SDK to use: http://localhost:3472
+
+✅ Server running on port 3472
+� Health check: http://localhost:3472/health

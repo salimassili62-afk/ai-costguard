@@ -18,6 +18,7 @@ import { estimateMessagesTokens } from '../token-counter';
 import { estimateCost, getModelPricing } from '../config';
 import { detectionEngine } from '../core/DetectionEngine';
 import { stateStore, RequestRecord } from '../core/StateStore';
+import { logger } from '../logger';
 
 const program = new Command();
 
@@ -32,8 +33,36 @@ program
   .option('-p, --port <port>', 'Port to run the proxy on', '3000')
   .action(async (options) => {
     const port = parseInt(options.port, 10);
+    
+    console.log(chalk.green(`🚀 Starting AI Execution Firewall on port ${port}...`));
+    
+    // Direct function invocation - NO process spawning
     const server = new ProxyServer(port);
-    await server.start();
+    
+    try {
+      await server.start();
+      console.log(chalk.green(`✅ Server running on port ${port}`));
+      console.log(chalk.blue(`� Health check: http://localhost:${port}/health`));
+      
+      // Keep process alive
+      process.stdin.resume();
+      
+      // Handle graceful shutdown
+      process.on('SIGTERM', async () => {
+        console.log(chalk.yellow('\n🛑 Received SIGTERM, shutting down...'));
+        await server.stop();
+        process.exit(0);
+      });
+      
+      process.on('SIGINT', async () => {
+        console.log(chalk.yellow('\n🛑 Received SIGINT, shutting down...'));
+        await server.stop();
+        process.exit(0);
+      });
+    } catch (err) {
+      console.error(chalk.red('❌ Failed to start server:'), err);
+      process.exit(1);
+    }
   });
 
 program
