@@ -1,6 +1,6 @@
 {
   "name": "ai-execution-firewall",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A firewall that blocks dangerous AI requests before they execute",
   "main": "dist/index.js",
   "bin": {
