@@ -9,3 +9,18 @@ export { DetectionEngine, detectionEngine, DetectionResult, AnalyzeInput } from 
 export { StateStore, stateStore, RequestRecord, StateStats } from './core/StateStore';
 
 export { AIExecutionFirewall } from './wrapper';
+
+// Middleware exports - AI Execution Firewall as middleware layer
+export {
+  withFirewall,
+  wrapFunction,
+  expressFirewall,
+  withFirewallHandler,
+  checkRequest,
+  getFirewallStats,
+  FirewallOptions,
+  FirewallMiddlewareOptions,
+  OpenAIRequest,
+  ChatMessage,
+  AIRequestBody,
+} from './wrapper/aiFirewall';
