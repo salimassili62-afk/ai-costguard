@@ -1,0 +1,206 @@
+name: AI Firewall Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, master]
+
+jobs:
+  ai-firewall-scan:
+    name: AI Cost Protection Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install AI Execution Firewall
+        run: npm install -g ai-execution-firewall
+
+      - name: Initialize Firewall Config
+        run: |
+          if [ ! -f "aifw.config.json" ]; then
+            echo '{
+              "defaultMode": "block",
+              "riskThreshold": 50,
+              "budgetPerDay": 50,
+              "logging": true
+            }' > aifw.config.json
+          fi
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            **/*.ts
+            **/*.js
+            **/*.tsx
+            **/*.jsx
+
+      - name: Scan changed files for AI risks
+        id: scan
+        run: |
+          # Create output file
+          echo "scan_output<<EOF" >> $GITHUB_OUTPUT
+          
+          # Initialize counters
+          total_files=0
+          high_risk_count=0
+          medium_risk_count=0
+          low_risk_count=0
+          
+          # Scan each changed file
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [ -f "$file" ]; then
+              # Check if file contains AI API calls
+              if grep -E "(openai|anthropic|gpt-|claude-3)" "$file" > /dev/null 2>&1; then
+                total_files=$((total_files + 1))
+                
+                # Run firewall check on file content
+                result=$(ai-execution-firewall check "$(cat $file | head -c 2000)" --model gpt-4 2>&1 || true)
+                
+                # Parse risk level from output
+                if echo "$result" | grep -q "RISK: HIGH"; then
+                  high_risk_count=$((high_risk_count + 1))
+                  echo "🔴 HIGH: $file" >> scan_output_temp.txt
+                elif echo "$result" | grep -q "RISK: MEDIUM"; then
+                  medium_risk_count=$((medium_risk_count + 1))
+                  echo "🟡 MEDIUM: $file" >> scan_output_temp.txt
+                else
+                  low_risk_count=$((low_risk_count + 1))
+                  echo "🟢 LOW: $file" >> scan_output_temp.txt
+                fi
+                
+                echo "" >> scan_output_temp.txt
+              fi
+            fi
+          done
+          
+          # Output summary
+          echo "### AI Firewall Scan Results" >> scan_output_temp.txt
+          echo "" >> scan_output_temp.txt
+          echo "| Metric | Value |" >> scan_output_temp.txt
+          echo "|--------|-------|" >> scan_output_temp.txt
+          echo "| Files Scanned | $total_files |" >> scan_output_temp.txt
+          echo "| High Risk | $high_risk_count |" >> scan_output_temp.txt
+          echo "| Medium Risk | $medium_risk_count |" >> scan_output_temp.txt
+          echo "| Low Risk | $low_risk_count |" >> scan_output_temp.txt
+          echo "" >> scan_output_temp.txt
+          
+          # Determine pass/fail
+          if [ $high_risk_count -gt 0 ]; then
+            echo "❌ **FAILED**: $high_risk_count HIGH risk file(s) detected" >> scan_output_temp.txt
+            echo "status=FAIL" >> $GITHUB_OUTPUT
+          else
+            echo "✅ **PASSED**: No high-risk AI usage detected" >> scan_output_temp.txt
+            echo "status=PASS" >> $GITHUB_OUTPUT
+          fi
+          
+          cat scan_output_temp.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          rm -f scan_output_temp.txt
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const scanOutput = `${{ steps.scan.outputs.scan_output }}`;
+            const status = `${{ steps.scan.outputs.status }}`;
+            
+            const body = `## 🛡️ AI Execution Firewall - PR Check
+            
+            ${scanOutput}
+            
+            ---
+            *This check ensures AI cost protection before code merges.*
+            `;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('AI Execution Firewall')
+            );
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Check for failure
+        if: steps.scan.outputs.status == 'FAIL'
+        run: |
+          echo "❌ AI Firewall detected HIGH risk patterns"
+          echo "Review the PR comment for details"
+          exit 1
+
+  cost-estimate:
+    name: Cost Impact Analysis
+    runs-on: ubuntu-latest
+    needs: ai-firewall-scan
+    if: always()
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install AI Execution Firewall
+        run: npm install -g ai-execution-firewall
+
+      - name: Generate cost report
+        run: |
+          echo "### 💰 Potential Cost Impact"
+          echo ""
+          
+          # Check for API calls in changed files
+          if grep -r "openai.chat.completions.create" . --include="*.ts" --include="*.js" 2>/dev/null | head -5 > /dev/null; then
+            echo "- OpenAI API calls detected"
+            echo "- Estimated cost per call: $0.002 - $0.12"
+            echo "- Risk level varies by model and token count"
+          fi
+          
+          if grep -r "gpt-4" . --include="*.ts" --include="*.js" 2>/dev/null | head -5 > /dev/null; then
+            echo ""
+            echo "⚠️ **GPT-4 Usage**: High-cost model detected"
+            echo "- Input: $0.03 per 1K tokens"
+            echo "- Output: $0.06 per 1K tokens"
+          fi

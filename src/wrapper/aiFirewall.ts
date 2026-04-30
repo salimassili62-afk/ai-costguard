@@ -42,10 +42,10 @@ export {
 // Also export the main class for advanced usage
 export { AIExecutionFirewall } from './sdk';
 
-// Export detection engine for custom integrations
-export { detectionEngine } from '../core/DetectionEngine';
+// Export detection engine and alert hooks for custom integrations
+export { detectionEngine, AlertHooks } from '../core/DetectionEngine';
 
-// Export configuration
+// Export configuration for budget protection and settings
 export { ConfigManager } from '../config';
 
 /**

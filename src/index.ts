@@ -7,6 +7,12 @@ export * from './wrapper';
 // Core exports - explicit to avoid conflict with config.Decision
 export { DetectionEngine, detectionEngine, DetectionResult, AnalyzeInput } from './core/DetectionEngine';
 export { StateStore, stateStore, RequestRecord, StateStats } from './core/StateStore';
+export { CostTruthEngine, costTruthEngine, CostTruthResult, CostComparison } from './core/CostTruthEngine';
+export { Logger, logger, LogEntry, LogStats } from './core/Logger';
+export { CostLedger, costLedger, CostLedgerEntry, CostEstimate, CostActual } from './core/CostLedger';
+export { AuditTrail, auditTrail, AuditEntry, AuditStats } from './core/AuditTrail';
+export { PricingConfig, pricingConfig, ModelPricing, TokenUsage, CostCalculation } from './core/PricingConfig';
+export { SessionStatsManager, sessionStats, SessionStats, DailyStats } from './core/SessionStats';
 
 export { AIExecutionFirewall } from './wrapper';
 

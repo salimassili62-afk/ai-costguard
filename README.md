@@ -1,16 +1,34 @@
-# AI Execution Firewall
+# AI Cost Protection Layer for Production Systems
 
-Stop AI agents from burning money in production.
+**Prevent AI agents from silently burning $100–$1000 in minutes.**
 
-## The Problem
+> 🚨 **This is not optional. This is infrastructure that prevents financial loss.**
 
-AI agents in production systems can accidentally trigger runaway loops, duplicate requests, and context explosions that burn through API credits in seconds. Traditional monitoring only tells you after the money is gone.
+## The $10,000 Problem
 
-## The Solution
+AI agents in production can trigger runaway loops, infinite recursion, and cost spikes that drain your API budget before you notice:
 
-AI Execution Firewall sits between your code and AI APIs, detecting and blocking dangerous request patterns before they execute. It's a safety layer that prevents cost waste in real-time.
+- **Runaway loops**: 3+ identical requests in 30 seconds → $200+ per hour
+- **Token bombs**: Single request asking for 100k tokens → $30+ per call
+- **Agent storms**: 150+ requests/minute → $600+ per hour
+- **Silent duplication**: Same prompt repeated → 10x unnecessary cost
 
-## What It Detects
+**Traditional monitoring only tells you after the money is gone.**
+
+## The Solution: AI Execution Firewall
+
+A cost protection layer that **blocks dangerous requests BEFORE execution** — not after you've already paid.
+
+### 💰 Financial Impact
+
+| Scenario | Without Firewall | With Firewall | **Saved** |
+|----------|-----------------|---------------|-----------|
+| Runaway loop (1 hour) | $245 burned | $0 blocked | **$245** |
+| Token bomb (1 request) | $30 charged | $0 blocked | **$30** |
+| Cost spike (1 hour) | $620 spent | $0 blocked | **$620** |
+| Daily protection | Variable | Capped at $50 | **$$$** |
+
+## What It Detects & Blocks
 
 | Pattern | Threshold | Action |
 |---------|-----------|--------|
@@ -22,52 +40,167 @@ AI Execution Firewall sits between your code and AI APIs, detecting and blocking
 
 Kill switch activates at danger score ≥90, blocking regardless of trust mode.
 
+## 🆕 Infrastructure Upgrades (v1.0.5)
+
+### 1. Real Cost Truth (Not Estimation)
+- Extracts actual token usage from API responses
+- Maps tokens to real pricing (OpenAI, Anthropic, Google, Cohere)
+- Tracks: `actualCost`, `estimatedCost`, `saved`, `wouldHaveLost`
+- Rule: `saved = wouldHaveLost - actualSpent`
+
+### 2. Strict Default Enforcement
+- Default mode: **BLOCK** (non-optional)
+- CI fails by default on HIGH risk
+- Proxy blocks automatically without config
+- `--strict` flag for enforcement
+
+### 3. Impact-Driven Output
+```
+🔥 YOU ALMOST LOST $245.00
+🛡️ BLOCKED BEFORE EXECUTION
+
+DETAILS:
+COST: $0.00
+WOULD HAVE LOST: $245.00
+SAVED: $245.00
+RISK: CRITICAL
+DECISION: BLOCK
+```
+
+### 4. Session-Level Aggregation
+```bash
+aifw summary
+```
+```
+💸 WITHOUT FIREWALL:
+   You would have spent $125.50
+
+🛡️ WITH FIREWALL:
+   You spent $12.30
+   Saved $113.20
+```
+
 ## Installation
 
 ```bash
 npm install -g ai-execution-firewall
 ```
 
+**Auto-setup on install:**
+- Detects project type (Next.js, Express, Node.js)
+- Creates `aifw.config.json`
+- Generates integration example
+- Adds npm scripts
+
 ## Quick Start
 
-### Option 1: Proxy Mode (Recommended)
+### Initialize Project
+
+```bash
+npx ai-execution-firewall init
+```
+
+Creates:
+- `aifw.config.json` - Configuration
+- `aifw.example.js` - Integration example
+- `.github/workflows/aifw.yml` - CI/CD workflow
+
+### See It In Action (Demo)
+
+```bash
+aifw demo
+```
+
+**Output shows real money saved:**
+```
+📊 SCENARIO 1: Agent Loop Detection
+⚠️  LOOP DETECTED (47 repeated requests)
+🔥 RISK LEVEL: CRITICAL
+💰 ESTIMATED COST PREVENTED: $4.23
+🚨 IF NOT BLOCKED: ~$245/day potential loss
+✅ ACTION: BLOCKED - Loop broken, credits saved
+```
+
+### Option 1: SDK Middleware (Recommended)
+
+**Zero code changes. Drop-in protection.**
+
+```typescript
+import { withFirewall } from 'ai-execution-firewall';
+import OpenAI from 'openai';
+
+// Wrap your client — ALL calls now protected
+const openai = withFirewall(new OpenAI({ apiKey: '...' }), {
+  trustMode: 'block',  // 'monitor' | 'warn' | 'block'
+
+  // Real-time alerts
+  onBlock: (reason, dangerScore, estimatedCost) => {
+    console.log(`🔥 BLOCKED: ${reason}`);
+    console.log(`💰 SAVED: $${estimatedCost}`);
+  },
+  onWarn: (reason, dangerScore, estimatedCost) => {
+    console.log(`⚠️  WARNING: ${reason}`);
+  },
+  onSpike: (requests, timeWindow) => {
+    console.log(`🚨 SPIKE: ${requests} requests in ${timeWindow}s`);
+  }
+});
+
+// Use normally — firewall intercepts automatically
+const response = await openai.chat.completions.create({
+  model: 'gpt-4',
+  messages: [{ role: 'user', content: 'Hello' }]
+});
+
+// Also intercepts:
+await openai.responses.create({...});
+await openai.chat.completions.create({...});  // Any nested call
+```
+
+### Option 2: Express Middleware
+
+```typescript
+import express from 'express';
+import { expressFirewall } from 'ai-execution-firewall';
+
+const app = express();
+
+// Global protection for all AI endpoints
+app.use(expressFirewall({
+  trustMode: 'block',
+  onBlock: (req, res, reason) => {
+    res.status(403).json({
+      error: 'Blocked by AI Cost Protection',
+      reason,
+      saved: '$$$'
+    });
+  }
+}));
+
+app.post('/v1/chat/completions', handleChat);
+```
+
+### Option 3: Proxy Mode
 
 ```bash
 # Start the firewall proxy
 aifw start --port 3000
 
 # Configure your AI SDK to use the proxy
-# OpenAI example:
 baseURL: 'http://localhost:3000/v1'
-
-# Anthropic example:
-baseURL: 'http://localhost:3000'
 ```
 
-### Option 2: SDK Mode
-
-```typescript
-import { AIExecutionFirewall } from 'ai-execution-firewall';
-
-const firewall = new AIExecutionFirewall();
-
-// Wrap your AI API calls
-const result = await firewall.call(
-  async () => await openai.chat.completions.create({...}),
-  { model: 'gpt-4', messages: [...] }
-);
-
-if (result.blocked) {
-  console.log('Blocked:', result.reason);
-  console.log('Money saved:', result.savedAmount);
-}
-```
-
-### Option 3: CLI Check
+### Option 4: CLI Check
 
 ```bash
 # Check if a request is safe before sending
 aifw check "your prompt here" --model gpt-4
+
+# View cost protection dashboard
+aifw dashboard
+
+# Set daily budget limit
+aifw budget --set 50.00
 ```
 
 ## Configuration
@@ -91,8 +224,11 @@ aifw config --danger-threshold 60
 ## Commands
 
 ```bash
-aifw check <prompt>      # Check if a request is safe
+aifw demo                 # See cost protection scenarios in action
+aifw check <prompt>       # Check if a request is safe
 aifw start                # Start the firewall proxy
+aifw dashboard            # View real-time cost protection dashboard
+aifw budget               # Configure daily spending limits
 aifw report               # View protection statistics
 aifw config               # Configure firewall settings
 aifw blocked              # View blocked requests log

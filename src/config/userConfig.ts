@@ -13,17 +13,19 @@ export interface UserConfig {
   logRetentionDays: number;
   apiKey?: string;
   rateLimitPerMinute: number;
+  dailyBudget: number;  // Daily spending limit for budget protection
 }
 
 const DEFAULT_CONFIG: UserConfig = {
-  trustMode: 'warn',
+  trustMode: 'block',  // STRICT DEFAULT: block mode for production safety
   maxCostPerRequest: 1.0,
   dangerThreshold: 50,
-  allowOverride: true,
+  allowOverride: false,  // STRICT DEFAULT: cannot override without config file
   proxyPort: 3000,
   logRetentionDays: 30,
   apiKey: undefined,
   rateLimitPerMinute: 60,
+  dailyBudget: 50.0,  // $50/day default budget protection
 };
 
 export class ConfigManager {
@@ -94,6 +96,10 @@ export class ConfigManager {
 
   get proxyPort(): number {
     return this.config.proxyPort;
+  }
+
+  get dailyBudget(): number {
+    return this.config.dailyBudget;
   }
 
   get apiKey(): string | undefined {

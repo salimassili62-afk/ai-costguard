@@ -18,15 +18,21 @@
 import { randomUUID } from 'crypto';
 import { stateStore, RequestRecord } from './StateStore';
 import { DETECTION_THRESHOLDS, TIME_WINDOWS, DECISIONS, ALERT_CATEGORIES } from '../config/constants';
+import { ConfigManager } from '../config';
 
 export type Decision = 'allow' | 'warn' | 'block';
 export type Category = 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'safe' | 'invalid';
 
+export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
 export interface DetectionResult {
   decision: Decision;
   dangerScore: number; // 0-100
+  riskLevel: RiskLevel; // LOW/MEDIUM/HIGH/CRITICAL
   category: Category;
   reason: string;
+  saved: number; // Money saved by this decision
+  wouldHaveLost: number; // What would have been lost without firewall
   metadata: {
     promptHash: string;
     duplicateCount: number;
@@ -37,6 +43,17 @@ export interface DetectionResult {
   };
 }
 
+/**
+ * Map danger score (0-100) to risk level
+ * 0-30: LOW, 31-70: MEDIUM, 71-100: HIGH, 90+: CRITICAL (kill switch)
+ */
+function getRiskLevel(dangerScore: number): RiskLevel {
+  if (dangerScore >= 90) return 'CRITICAL';
+  if (dangerScore >= 71) return 'HIGH';
+  if (dangerScore >= 31) return 'MEDIUM';
+  return 'LOW';
+}
+
 export interface AnalyzeInput {
   model: string;
   prompt: string;
@@ -44,6 +61,15 @@ export interface AnalyzeInput {
   context?: string;
   trustMode?: 'monitor' | 'warn' | 'block';
   override?: boolean;
+  onBlock?: (reason: string, dangerScore: number, estimatedCost: number) => void;
+  onWarn?: (reason: string, dangerScore: number, estimatedCost: number) => void;
+  onSpike?: (requests: number, timeWindow: number) => void;
+}
+
+export interface AlertHooks {
+  onBlock?: (reason: string, dangerScore: number, estimatedCost: number) => void;
+  onWarn?: (reason: string, dangerScore: number, estimatedCost: number) => void;
+  onSpike?: (requests: number, timeWindow: number) => void;
 }
 
 /**
@@ -133,6 +159,14 @@ export class DetectionEngine {
       // First duplicate = 40 (warn), Second = 50 (block threshold)
       const dangerScore = Math.min(90, 30 + duplicateCheck.count * 10);
       const decision = this.determineDecision(dangerScore, trustMode);
+      
+      // Trigger hooks if provided
+      if (decision === 'block' && input.onBlock) {
+        input.onBlock(duplicateCheck.reason, dangerScore, estimatedCost);
+      } else if (decision === 'warn' && input.onWarn) {
+        input.onWarn(duplicateCheck.reason, dangerScore, estimatedCost);
+      }
+      
       this.recordRequest(input, promptHash, true, dangerScore, 'duplicate', duplicateCheck.reason);
       return this.createResult(
         decision,
@@ -148,12 +182,39 @@ export class DetectionEngine {
     if (costCheck.isSpike) {
       const dangerScore = costCheck.score;
       const decision = this.determineDecision(dangerScore, trustMode);
+      
+      // Trigger onSpike hook if provided
+      if (input.onSpike) {
+        input.onSpike(1, 60); // 1 spike detected in 60s window
+      }
+      
       this.recordRequest(input, promptHash, true, dangerScore, 'spike', costCheck.reason);
       return this.createResult(
         decision,
         dangerScore,
         'spike',
         costCheck.reason,
+        { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
+      );
+    }
+
+    // Check 3.5: Daily budget protection
+    const budgetCheck = this.detectBudgetLimit(estimatedCost);
+    if (budgetCheck.wouldExceed) {
+      const dangerScore = 75; // High score for budget protection
+      const reason = `💰 DAILY BUDGET EXCEEDED: Would exceed $${budgetCheck.budget.toFixed(2)} daily limit`;
+      
+      // Trigger onBlock hook if provided
+      if (input.onBlock) {
+        input.onBlock(reason, dangerScore, estimatedCost);
+      }
+      
+      this.recordRequest(input, promptHash, true, dangerScore, 'spike', reason);
+      return this.createResult(
+        'block',
+        dangerScore,
+        'spike',
+        reason,
         { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
       );
     }
@@ -260,15 +321,30 @@ export class DetectionEngine {
       const costMultiplier = (estimatedCost - 0.05) * 50;
       // Floor to integer for deterministic output
       const score = Math.min(100, Math.floor(baseScore + costMultiplier));
-      
+
       return {
         isSpike: true,
         score,
         reason: `💸 COST SPIKE: Single request costs $${estimatedCost.toFixed(2)}`
       };
     }
-    
+
     return { isSpike: false, score: 0, reason: '' };
+  }
+
+  /**
+   * Detect if request would exceed daily budget limit
+   */
+  private detectBudgetLimit(estimatedCost: number): { wouldExceed: boolean; budget: number; currentSpend: number } {
+    const config = new ConfigManager();
+    const dailyBudget = config.dailyBudget;
+
+    // Get current daily spending from stats
+    const stats = stateStore.getStats(24);
+    const currentSpend = stats.totalCost;
+    const wouldExceed = (currentSpend + estimatedCost) > dailyBudget;
+
+    return { wouldExceed, budget: dailyBudget, currentSpend };
   }
 
   /**
@@ -350,11 +426,26 @@ export class DetectionEngine {
   ): DetectionResult {
     // Normalize dangerScore to integer (0-100) using floor
     const normalizedScore = Math.max(0, Math.min(100, Math.floor(dangerScore)));
+    const riskLevel = getRiskLevel(normalizedScore);
+    
+    // Calculate financial impact (saved / wouldHaveLost)
+    const saved = decision === 'block' ? metadata.estimatedCost : 0;
+    
+    // Get historical wouldHaveLost from stats and add this request
+    const stats = stateStore.getStats(24);
+    const historicalBlockedCost = stats.blockedRequests > 0 
+      ? stats.totalCost / (stats.totalRequests || 1) * stats.blockedRequests 
+      : 0;
+    const wouldHaveLost = stats.totalCost + historicalBlockedCost + saved;
+    
     return {
       decision,
       dangerScore: normalizedScore,
+      riskLevel,
       category,
       reason,
+      saved: Math.round(saved * 10000) / 10000,
+      wouldHaveLost: Math.round(wouldHaveLost * 10000) / 10000,
       metadata
     };
   }
