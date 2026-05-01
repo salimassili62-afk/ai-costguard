@@ -1,6 +1,6 @@
 /**
  * Production-grade Logger with explicit log levels
- * 
+ *
  * Design principles:
  * - No environment-based silencing (NODE_ENV, etc.)
  * - Explicit log level configuration

@@ -1,6 +1,6 @@
 /**
  * Logger.ts - Persistent Logging System
- * 
+ *
  * Stores all AI request data locally:
  * - timestamp
  * - request content (prompt)
@@ -8,7 +8,7 @@
  * - risk score
  * - decision (ALLOW/BLOCK/WARN)
  * - model used
- * 
+ *
  * Storage: JSON file (simple, no external dependencies)
  */
 
@@ -153,23 +153,23 @@ export class Logger {
     let logs = this.readLogs();
 
     if (query.startTime !== undefined) {
-      logs = logs.filter(l => l.timestamp >= query.startTime!);
+      logs = logs.filter((l) => l.timestamp >= query.startTime!);
     }
 
     if (query.endTime !== undefined) {
-      logs = logs.filter(l => l.timestamp <= query.endTime!);
+      logs = logs.filter((l) => l.timestamp <= query.endTime!);
     }
 
     if (query.decision) {
-      logs = logs.filter(l => l.decision === query.decision);
+      logs = logs.filter((l) => l.decision === query.decision);
     }
 
     if (query.riskLevel) {
-      logs = logs.filter(l => l.riskLevel === query.riskLevel);
+      logs = logs.filter((l) => l.riskLevel === query.riskLevel);
     }
 
     if (query.model) {
-      logs = logs.filter(l => l.model === query.model);
+      logs = logs.filter((l) => l.model === query.model);
     }
 
     // Sort by timestamp descending (newest first)
@@ -186,19 +186,17 @@ export class Logger {
    * Get statistics for a time period
    */
   getStats(hours: number = 24): LogStats {
-    const cutoff = Date.now() - (hours * 60 * 60 * 1000);
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
     const logs = this.query({ startTime: cutoff });
 
-    const allowedCount = logs.filter(l => l.decision === 'ALLOW').length;
-    const blockedCount = logs.filter(l => l.decision === 'BLOCK').length;
-    const warnedCount = logs.filter(l => l.decision === 'WARN').length;
+    const allowedCount = logs.filter((l) => l.decision === 'ALLOW').length;
+    const blockedCount = logs.filter((l) => l.decision === 'BLOCK').length;
+    const warnedCount = logs.filter((l) => l.decision === 'WARN').length;
 
     const totalSaved = logs.reduce((sum, l) => sum + l.saved, 0);
     const totalWouldHaveLost = logs.reduce((sum, l) => sum + l.wouldHaveLost, 0);
 
-    const averageRiskScore = logs.length > 0
-      ? logs.reduce((sum, l) => sum + l.riskScore, 0) / logs.length
-      : 0;
+    const averageRiskScore = logs.length > 0 ? logs.reduce((sum, l) => sum + l.riskScore, 0) / logs.length : 0;
 
     return {
       totalEntries: logs.length,

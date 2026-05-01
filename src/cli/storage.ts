@@ -48,14 +48,14 @@ function ensureStorage(): void {
  */
 export function loadRequestHistory(): CLIRequestRecord[] {
   ensureStorage();
-  
+
   if (!fs.existsSync(HISTORY_FILE)) {
     return [];
   }
 
   const records: CLIRequestRecord[] = [];
   const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').split('\n');
-  
+
   for (const line of lines) {
     if (!line.trim()) continue;
     try {
@@ -65,7 +65,7 @@ export function loadRequestHistory(): CLIRequestRecord[] {
       // Skip invalid lines
     }
   }
-  
+
   return records;
 }
 
@@ -75,11 +75,8 @@ export function loadRequestHistory(): CLIRequestRecord[] {
 export function getRecentRequestsByHash(hash: string, windowMs: number = 30000): CLIRequestRecord[] {
   const now = Date.now();
   const allRecords = loadRequestHistory();
-  
-  return allRecords.filter(r => 
-    r.promptHash === hash && 
-    (now - r.timestamp) < windowMs
-  );
+
+  return allRecords.filter((r) => r.promptHash === hash && now - r.timestamp < windowMs);
 }
 
 /**
@@ -88,8 +85,8 @@ export function getRecentRequestsByHash(hash: string, windowMs: number = 30000):
 export function getRecentRequests(windowMs: number = 3600000): CLIRequestRecord[] {
   const now = Date.now();
   const allRecords = loadRequestHistory();
-  
-  return allRecords.filter(r => (now - r.timestamp) < windowMs);
+
+  return allRecords.filter((r) => now - r.timestamp < windowMs);
 }
 
 /**
@@ -113,14 +110,14 @@ export function getCLIStats(hours: number = 24): {
 } {
   const windowMs = hours * 3600000;
   const now = Date.now();
-  const records = loadRequestHistory().filter(r => (now - r.timestamp) < windowMs);
-  
+  const records = loadRequestHistory().filter((r) => now - r.timestamp < windowMs);
+
   return {
     totalRequests: records.length,
-    blockedRequests: records.filter(r => r.wasBlocked).length,
-    warnedRequests: records.filter(r => r.wasWarned && !r.wasBlocked).length,
+    blockedRequests: records.filter((r) => r.wasBlocked).length,
+    warnedRequests: records.filter((r) => r.wasWarned && !r.wasBlocked).length,
     totalCost: records.reduce((sum, r) => sum + r.estimatedCost, 0),
-    preventedCost: records.filter(r => r.wasBlocked).reduce((sum, r) => sum + r.estimatedCost, 0),
+    preventedCost: records.filter((r) => r.wasBlocked).reduce((sum, r) => sum + r.estimatedCost, 0),
   };
 }
 
@@ -130,9 +127,9 @@ export function getCLIStats(hours: number = 24): {
 export function getBlockedRequests(limit: number = 10): CLIRequestRecord[] {
   const windowMs = 24 * 3600000; // 24 hours
   const now = Date.now();
-  
+
   return loadRequestHistory()
-    .filter(r => r.wasBlocked && (now - r.timestamp) < windowMs)
+    .filter((r) => r.wasBlocked && now - r.timestamp < windowMs)
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, limit);
 }

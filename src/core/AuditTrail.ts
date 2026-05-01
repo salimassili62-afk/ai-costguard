@@ -1,6 +1,6 @@
 /**
  * AuditTrail.ts - Complete Audit Trail System
- * 
+ *
  * Stores ALL blocked and allowed requests
  * Supports CLI queries: aifw blocked, aifw logs
  */
@@ -166,23 +166,23 @@ export class AuditTrail {
 
     // Apply filters
     if (query.startTime !== undefined) {
-      allEntries = allEntries.filter(e => e.timestamp >= query.startTime!);
+      allEntries = allEntries.filter((e) => e.timestamp >= query.startTime!);
     }
 
     if (query.endTime !== undefined) {
-      allEntries = allEntries.filter(e => e.timestamp <= query.endTime!);
+      allEntries = allEntries.filter((e) => e.timestamp <= query.endTime!);
     }
 
     if (query.riskLevel) {
-      allEntries = allEntries.filter(e => e.riskLevel === query.riskLevel);
+      allEntries = allEntries.filter((e) => e.riskLevel === query.riskLevel);
     }
 
     if (query.category) {
-      allEntries = allEntries.filter(e => e.category === query.category);
+      allEntries = allEntries.filter((e) => e.category === query.category);
     }
 
     if (query.source) {
-      allEntries = allEntries.filter(e => e.metadata?.source === query.source);
+      allEntries = allEntries.filter((e) => e.metadata?.source === query.source);
     }
 
     // Sort by timestamp descending
@@ -226,11 +226,11 @@ export class AuditTrail {
    * Get audit statistics
    */
   getStats(hours: number = 24): AuditStats {
-    const cutoff = Date.now() - (hours * 60 * 60 * 1000);
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
 
-    const blocked = this.readFile(this.blockedFile).filter(e => e.timestamp >= cutoff);
-    const allowed = this.readFile(this.allowedFile).filter(e => e.timestamp >= cutoff);
-    const warned = this.readFile(this.warnedFile).filter(e => e.timestamp >= cutoff);
+    const blocked = this.readFile(this.blockedFile).filter((e) => e.timestamp >= cutoff);
+    const allowed = this.readFile(this.allowedFile).filter((e) => e.timestamp >= cutoff);
+    const warned = this.readFile(this.warnedFile).filter((e) => e.timestamp >= cutoff);
 
     const totalSaved = blocked.reduce((sum, e) => sum + e.saved, 0);
     const totalWouldHaveLost = [...blocked, ...allowed].reduce((sum, e) => sum + e.wouldHaveLost, 0);

@@ -23,7 +23,9 @@ If you discover a security vulnerability, please report it privately:
 - In-memory implementation for performance
 
 ### Data Privacy
-- **Prompt Storage**: Full prompt text is stored in plaintext in `~/.aifw/history.jsonl`
+- **Prompt Storage**: Prompt history is hash-only by default in `~/.aifw/history.jsonl`
+- **Redaction Mode**: Optional redacted prompt storage can remove configured secrets, emails, and IDs
+- **Plaintext Mode**: Full prompt storage is available only when explicitly configured with `privacy.promptStorage: "plaintext"`
 - **Hash Storage**: SHA-256 hashes stored for duplicate detection
 - **API Keys**: Not logged, only stored in config file
 - **Local Only**: All data stored locally on user's machine

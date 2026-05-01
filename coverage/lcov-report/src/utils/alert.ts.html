@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">82.6% </span>
+                <span class="strong">86.95% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>19/23</span>
+                <span class='fraction'>20/23</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">50% </span>
+                <span class="strong">58.33% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>6/12</span>
+                <span class='fraction'>7/12</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">82.6% </span>
+                <span class="strong">86.95% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>19/23</span>
+                <span class='fraction'>20/23</span>
             </div>
         
             
@@ -121,7 +121,8 @@
 <a name='L56'></a><a href='#L56'>56</a>
 <a name='L57'></a><a href='#L57'>57</a>
 <a name='L58'></a><a href='#L58'>58</a>
-<a name='L59'></a><a href='#L59'>59</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">6x</span>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -136,26 +137,26 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">6x</span>
-<span class="cline-any cline-yes">187x</span>
+<span class="cline-any cline-yes">7x</span>
+<span class="cline-any cline-yes">354x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
+<span class="cline-any cline-yes">354x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
+<span class="cline-any cline-yes">354x</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
+<span class="cline-any cline-yes">354x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">351x</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
-<span class="cline-any cline-yes">187x</span>
+<span class="cline-any cline-yes">351x</span>
+<span class="cline-any cline-yes">351x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
+<span class="cline-any cline-yes">354x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -164,20 +165,21 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
-<span class="cline-any cline-yes">187x</span>
-<span class="cline-any cline-yes">187x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">354x</span>
+<span class="cline-any cline-yes">354x</span>
+<span class="cline-any cline-yes">354x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
-<span class="cline-any cline-yes">187x</span>
-<span class="cline-any cline-yes">187x</span>
-<span class="cline-any cline-yes">561x</span>
+<span class="cline-any cline-yes">354x</span>
+<span class="cline-any cline-yes">354x</span>
+<span class="cline-any cline-yes">354x</span>
+<span class="cline-any cline-yes">1062x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">187x</span>
-<span class="cline-any cline-yes">187x</span>
+<span class="cline-any cline-yes">354x</span>
+<span class="cline-any cline-yes">354x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import chalk from 'chalk';
 &nbsp;
@@ -188,7 +190,7 @@
 &nbsp;
 export interface AlertData {
   severity: 'SAFE' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  category: 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'anomaly';
+  category: 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'budget' | 'anomaly';
   reason: string;
   estimatedLoss: number;
   suggestions: string[];
@@ -196,14 +198,14 @@ export interface AlertData {
 &nbsp;
 export function formatAlert(data: AlertData): string {
   const { severity, category, reason, estimatedLoss, suggestions } = data;
-  
+&nbsp;
   let output = '\n';
-  
+&nbsp;
   // Alert header
   <span class="missing-if-branch" title="if path not taken" >I</span>if (severity === 'SAFE') {
 <span class="cstat-no" title="statement not covered" >    return ''; </span>// Don't show alert for safe requests
-  } else <span class="missing-if-branch" title="if path not taken" >I</span>if (severity === 'CRITICAL') {
-<span class="cstat-no" title="statement not covered" >    output += chalk.red.bold('🚨 FIREWALL ALERT - CRITICAL\n');</span>
+  } else if (severity === 'CRITICAL') {
+    output += chalk.red.bold('🚨 FIREWALL ALERT - CRITICAL\n');
   } else <span class="missing-if-branch" title="if path not taken" >I</span>if (severity === 'HIGH') {
 <span class="cstat-no" title="statement not covered" >    output += chalk.red.bold('⚠️  FIREWALL ALERT - HIGH\n');</span>
   } else if (severity === 'MEDIUM') {
@@ -211,7 +213,7 @@ export function formatAlert(data: AlertData): string {
   } else <span class="missing-if-branch" title="else path not taken" >E</span>{
 <span class="cstat-no" title="statement not covered" >    output += chalk.blue.bold('ℹ️  FIREWALL ALERT - LOW\n');</span>
   }
-  
+&nbsp;
   // Category badge
   const categoryColors: Record&lt;string, any&gt; = {
     loop: chalk.red,
@@ -219,13 +221,14 @@ export function formatAlert(data: AlertData): string {
     fuzzy_duplicate: chalk.yellow,
     context: chalk.magenta,
     spike: chalk.red,
+    budget: chalk.red,
     anomaly: chalk.blue,
   };
-  
-  output += `${categoryColors[category] || <span class="branch-1 cbranch-no" title="branch not covered" >chalk.white}</span>Category: ${category.toUpperCase()}\n`;
+&nbsp;
+  output += (categoryColors[category] || <span class="branch-1 cbranch-no" title="branch not covered" >chalk.white)</span>(`Category: ${category.toUpperCase()}\n`);
   output += chalk.white(`Reason: ${reason}\n`);
   output += chalk.yellow(`💸 Potential loss: $${estimatedLoss.toFixed(4)}\n`);
-  
+&nbsp;
   // Suggestions
   <span class="missing-if-branch" title="else path not taken" >E</span>if (suggestions.length &gt; 0) {
     output += chalk.cyan('\nSuggestions:\n');
@@ -233,7 +236,7 @@ export function formatAlert(data: AlertData): string {
       output += chalk.cyan(`  ${i + 1}. ${s}\n`);
     });
   }
-  
+&nbsp;
   output += '\n';
   return output;
 }
@@ -244,7 +247,7 @@ export function formatAlert(data: AlertData): string {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-04-25T10:55:11.726Z
+                at 2026-05-01T11:07:11.036Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

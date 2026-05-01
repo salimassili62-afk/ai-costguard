@@ -58,22 +58,13 @@ describe('E2E System Tests - Full Integration', () => {
 
     test('SDK blocked call should be tracked in state', async () => {
       // First call
-      await sdk.call(
-        () => Promise.resolve({}),
-        { model: 'gpt-4', prompt: 'block test' }
-      );
+      await sdk.call(() => Promise.resolve({}), { model: 'gpt-4', prompt: 'block test' });
 
       // Second call - duplicate warning
-      const result = await sdk.call(
-        () => Promise.resolve({}),
-        { model: 'gpt-4', prompt: 'block test' }
-      );
+      const result = await sdk.call(() => Promise.resolve({}), { model: 'gpt-4', prompt: 'block test' });
 
       // Third call - should trigger higher warning
-      const result3 = await sdk.call(
-        () => Promise.resolve({}),
-        { model: 'gpt-4', prompt: 'block test' }
-      );
+      const result3 = await sdk.call(() => Promise.resolve({}), { model: 'gpt-4', prompt: 'block test' });
 
       // Check state has all 3 requests
       const stats = detectionEngine.getStats(1);
@@ -139,10 +130,7 @@ describe('E2E System Tests - Full Integration', () => {
 
     test('CLI report should show DetectionEngine stats', async () => {
       // Create state through SDK
-      await sdk.call(
-        () => Promise.resolve({}),
-        { model: 'gpt-4', prompt: 'cli report test' }
-      );
+      await sdk.call(() => Promise.resolve({}), { model: 'gpt-4', prompt: 'cli report test' });
 
       // CLI report should see it
       const { stdout } = await execAsync('node dist/cli/index.js report');
@@ -156,10 +144,7 @@ describe('E2E System Tests - Full Integration', () => {
       const prompt = 'cross interface test';
 
       // Make request through SDK
-      await sdk.call(
-        () => Promise.resolve({}),
-        { model: 'gpt-4', prompt }
-      );
+      await sdk.call(() => Promise.resolve({}), { model: 'gpt-4', prompt });
 
       // Same request through Proxy should detect duplicate
       const proxyResponse = await axios.post(
@@ -183,10 +168,7 @@ describe('E2E System Tests - Full Integration', () => {
       stateStore.reset();
 
       // Same request via SDK - should detect duplicate
-      const result = await sdk.call(
-        () => Promise.resolve({}),
-        { model: 'gpt-4', prompt: 'cross interface dup' }
-      );
+      const result = await sdk.call(() => Promise.resolve({}), { model: 'gpt-4', prompt: 'cross interface dup' });
 
       // Should detect duplicate or warning state
       expect(result.dangerScore).toBeGreaterThan(0);
@@ -201,10 +183,7 @@ describe('E2E System Tests - Full Integration', () => {
       const prompt = 'three way test';
 
       // Request 1: SDK
-      await sdk.call(
-        () => Promise.resolve({}),
-        { model: 'gpt-4', prompt: `${prompt} 1` }
-      );
+      await sdk.call(() => Promise.resolve({}), { model: 'gpt-4', prompt: `${prompt} 1` });
 
       // Request 2: Proxy
       await axios.post(
@@ -228,24 +207,15 @@ describe('E2E System Tests - Full Integration', () => {
       const prompt = 'hi'; // Short prompt
 
       // Phase 1: First request (may have cost spike due to SDK's 1000 output token estimate)
-      const r1 = await sdk.call(
-        () => Promise.resolve({ result: 'success' }),
-        { model: 'gpt-4', prompt }
-      );
+      const r1 = await sdk.call(() => Promise.resolve({ result: 'success' }), { model: 'gpt-4', prompt });
       expect(r1.success).toBe(true);
       expect(r1.blocked).toBe(false);
 
       // Phase 2: Second request - may be duplicate or cost spike
-      const r2 = await sdk.call(
-        () => Promise.resolve({ result: 'success' }),
-        { model: 'gpt-4', prompt }
-      );
+      const r2 = await sdk.call(() => Promise.resolve({ result: 'success' }), { model: 'gpt-4', prompt });
 
       // Phase 3: Third request - should trigger loop detection
-      const r3 = await sdk.call(
-        () => Promise.resolve({ result: 'success' }),
-        { model: 'gpt-4', prompt }
-      );
+      const r3 = await sdk.call(() => Promise.resolve({ result: 'success' }), { model: 'gpt-4', prompt });
       expect(r3.blocked).toBe(true);
       expect(r3.killSwitchTriggered).toBe(true);
 

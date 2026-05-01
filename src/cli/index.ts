@@ -2,10 +2,10 @@
 
 /**
  * CLI Interface - AI Execution Firewall
- * 
+ *
  * This file contains ONLY interface logic.
  * ALL detection happens in DetectionEngine (single source of truth).
- * 
+ *
  * Flow:
  *   User Input → CLI → DetectionEngine.analyze() → Output
  */
@@ -34,27 +34,27 @@ program
   .option('-p, --port <port>', 'Port to run the proxy on', '3000')
   .action(async (options) => {
     const port = parseInt(options.port, 10);
-    
+
     console.log(chalk.green(`🚀 Starting AI Execution Firewall on port ${port}...`));
-    
+
     // Direct function invocation - NO process spawning
     const server = new ProxyServer(port);
-    
+
     try {
       await server.start();
       console.log(chalk.green(`✅ Server running on port ${port}`));
       console.log(chalk.blue(`� Health check: http://localhost:${port}/health`));
-      
+
       // Keep process alive
       process.stdin.resume();
-      
+
       // Handle graceful shutdown
       process.on('SIGTERM', async () => {
         console.log(chalk.yellow('\n🛑 Received SIGTERM, shutting down...'));
         await server.stop();
         process.exit(0);
       });
-      
+
       process.on('SIGINT', async () => {
         console.log(chalk.yellow('\n🛑 Received SIGINT, shutting down...'));
         await server.stop();
@@ -74,7 +74,7 @@ program
     const hours = parseInt(options.hours) || 24;
     // DELEGATE to DetectionEngine (single source of truth)
     const stats = detectionEngine.getStats(hours);
-    
+
     console.log('\ud83d\udcca FIREWALL PROTECTION REPORT');
     console.log('='.repeat(30));
     console.log(`Time Window: Last ${hours} hours`);
@@ -86,7 +86,9 @@ program
     console.log(`Prevented Cost: $${stats.preventedCost.toFixed(4)}`);
     console.log('');
     if (stats.preventedCost > 0) {
-      console.log(`\ud83d\udea8 $${stats.preventedCost.toFixed(4)} saved from ${stats.blockedRequests} blocked requests`);
+      console.log(
+        `\ud83d\udea8 $${stats.preventedCost.toFixed(4)} saved from ${stats.blockedRequests} blocked requests`
+      );
     } else {
       console.log('\u2705 SAFE TO PROCEED - No dangerous requests');
     }
@@ -105,20 +107,20 @@ program
   .action((options) => {
     const config = new ConfigManager();
     const currentConfig = config.getConfig();
-    
+
     if (options.reset) {
       config.resetConfig();
       console.log(chalk.green('✅ Firewall reset to default protection settings'));
       return;
     }
-    
+
     if (options.clearHistory) {
       // DELEGATE to DetectionEngine (single source of truth)
       detectionEngine.clear();
       console.log(chalk.green('✅ Request history cleared'));
       return;
     }
-    
+
     if (options.trustMode !== undefined) {
       const validModes = ['monitor', 'warn', 'block'];
       if (validModes.includes(options.trustMode)) {
@@ -128,18 +130,20 @@ program
         return;
       }
     }
-    
+
     if (options.maxCost !== undefined) {
       config.updateConfig({ maxCostPerRequest: parseFloat(options.maxCost) });
     }
-    
+
     if (options.dangerThreshold !== undefined) {
       config.updateConfig({ dangerThreshold: parseInt(options.dangerThreshold) });
     }
-    
+
     console.log('\u2699\ufe0f  FIREWALL CONFIGURATION');
     console.log('='.repeat(30));
-    console.log(`${chalk.bold('Trust Mode:')} ${currentConfig.trustMode === 'block' ? chalk.red('BLOCK') : currentConfig.trustMode === 'warn' ? chalk.yellow('WARN') : chalk.green('MONITOR')}`);
+    console.log(
+      `${chalk.bold('Trust Mode:')} ${currentConfig.trustMode === 'block' ? chalk.red('BLOCK') : currentConfig.trustMode === 'warn' ? chalk.yellow('WARN') : chalk.green('MONITOR')}`
+    );
     console.log(`${chalk.bold('Danger Threshold:')} ${currentConfig.dangerThreshold}%`);
     console.log(`${chalk.bold('Max Cost:')} $${currentConfig.maxCostPerRequest.toFixed(2)}`);
     console.log('');
@@ -153,7 +157,7 @@ program
   .action((options) => {
     // DELEGATE to DetectionEngine (single source of truth)
     const blocked = detectionEngine.getBlocked(parseInt(options.number));
-    
+
     console.log('\ud83d\udeab FIREWALL BLOCK LOG');
     console.log('='.repeat(30));
 
@@ -163,10 +167,11 @@ program
       console.log('Recent Blocks:');
       blocked.forEach((req: RequestRecord) => {
         const date = new Date(req.timestamp).toLocaleString();
-        console.log(`[${date}] [${req.category}] ${req.prompt.substring(0, 50)} (Score: ${req.dangerScore})`);
+        const promptPreview = req.prompt.startsWith('[hash:') ? req.prompt : req.prompt.substring(0, 50);
+        console.log(`[${date}] [${req.category}] ${promptPreview} (Score: ${req.dangerScore})`);
       });
     }
-    
+
     console.log('');
     process.exit(0);
   });
@@ -207,7 +212,7 @@ program
       estimatedCost,
       context,
       trustMode: 'warn',
-      override: false
+      override: false,
     });
 
     // Format output - Impact-driven "OH SH*T" messaging
@@ -217,23 +222,33 @@ program
 
     if (result.decision !== 'allow') {
       // BLOCKED or WARNED - Impact-driven output
-      const riskEmoji = result.riskLevel === 'CRITICAL' ? '🔥' : 
-                       result.riskLevel === 'HIGH' ? '⚠️' : 
-                       result.riskLevel === 'MEDIUM' ? '⚡' : '📢';
-      
+      const riskEmoji =
+        result.riskLevel === 'CRITICAL'
+          ? '🔥'
+          : result.riskLevel === 'HIGH'
+            ? '⚠️'
+            : result.riskLevel === 'MEDIUM'
+              ? '⚡'
+              : '📢';
+
       console.log('');
       console.log(chalk.red.bold(`${riskEmoji} YOU ALMOST LOST $${result.wouldHaveLost.toFixed(2)}`));
       console.log(chalk.green.bold(`🛡️ BLOCKED BEFORE EXECUTION`));
       console.log('');
-      
+
       console.log(chalk.bold('DETAILS:'));
       console.log(`COST: $${estimatedCost.toFixed(4)}`);
       console.log(`WOULD HAVE LOST: $${result.wouldHaveLost.toFixed(4)}`);
       console.log(chalk.green.bold(`SAVED: $${result.saved.toFixed(4)}`));
-      
-      const riskColor = result.riskLevel === 'CRITICAL' ? chalk.redBright :
-                        result.riskLevel === 'HIGH' ? chalk.red :
-                        result.riskLevel === 'MEDIUM' ? chalk.yellow : chalk.gray;
+
+      const riskColor =
+        result.riskLevel === 'CRITICAL'
+          ? chalk.redBright
+          : result.riskLevel === 'HIGH'
+            ? chalk.red
+            : result.riskLevel === 'MEDIUM'
+              ? chalk.yellow
+              : chalk.gray;
       console.log(`RISK: ${riskColor(result.riskLevel)}`);
       console.log(`DECISION: ${chalk.red.bold('BLOCK')}`);
       console.log(`DANGER SCORE: ${result.dangerScore}`);
@@ -250,13 +265,20 @@ program
 
     console.log('');
     console.log('─'.repeat(50));
-    console.log(chalk.gray('Universal Format:'), JSON.stringify({
-      cost: estimatedCost,
-      risk: result.riskLevel,
-      decision: result.decision.toUpperCase(),
-      saved: result.saved,
-      wouldHaveLost: result.wouldHaveLost
-    }, null, 2));
+    console.log(
+      chalk.gray('Universal Format:'),
+      JSON.stringify(
+        {
+          cost: estimatedCost,
+          risk: result.riskLevel,
+          decision: result.decision.toUpperCase(),
+          saved: result.saved,
+          wouldHaveLost: result.wouldHaveLost,
+        },
+        null,
+        2
+      )
+    );
     console.log('─'.repeat(50));
     console.log(`Estimated Cost: $${estimatedCost.toFixed(4)}`);
     process.exit(0);
@@ -272,7 +294,7 @@ program
   .action(() => {
     console.log(chalk.bold('\n🔥 AI EXECUTION FIREWALL - COST PROTECTION DEMO\n'));
     console.log(chalk.gray('Real-world scenarios showing money saved by blocking dangerous requests\n'));
-    
+
     // Scenario 1: Loop Detection
     console.log(chalk.yellow('─'.repeat(60)));
     console.log(chalk.bold('📊 SCENARIO 1: Agent Loop Detection'));
@@ -286,7 +308,7 @@ program
     console.log(chalk.red('🚨 IF NOT BLOCKED: ~$245/day potential loss'));
     console.log(chalk.green('✅ ACTION: BLOCKED - Loop broken, credits saved'));
     console.log('');
-    
+
     // Scenario 2: Token Bomb
     console.log(chalk.yellow('─'.repeat(60)));
     console.log(chalk.bold('📊 SCENARIO 2: Token Bomb Prevention'));
@@ -300,7 +322,7 @@ program
     console.log(chalk.red('🚨 IF NOT BLOCKED: Production budget drained in minutes'));
     console.log(chalk.green('✅ ACTION: BLOCKED - Exceeded safe threshold'));
     console.log('');
-    
+
     // Scenario 3: Cost Spike
     console.log(chalk.yellow('─'.repeat(60)));
     console.log(chalk.bold('📊 SCENARIO 3: Cost Spike Detection'));
@@ -314,7 +336,7 @@ program
     console.log(chalk.red('🚨 IF NOT BLOCKED: ~$620/hour potential burn rate'));
     console.log(chalk.green('✅ ACTION: BLOCKED - Rate limit enforced'));
     console.log('');
-    
+
     // Scenario 4: Daily Budget Protection
     console.log(chalk.yellow('─'.repeat(60)));
     console.log(chalk.bold('📊 SCENARIO 4: Daily Budget Protection'));
@@ -329,7 +351,7 @@ program
     console.log(chalk.red('🚨 IF NOT BLOCKED: Daily budget exceeded by $0.55'));
     console.log(chalk.green('✅ ACTION: BLOCKED - Budget protection active'));
     console.log('');
-    
+
     // Summary
     console.log(chalk.green('═'.repeat(60)));
     console.log(chalk.bold('💸 TOTAL PROTECTION VALUE'));
@@ -341,7 +363,7 @@ program
     console.log(chalk.cyan('Without AI Execution Firewall, these scenarios would have'));
     console.log(chalk.cyan('burned real money. This is not theoretical — production agents'));
     console.log(chalk.cyan('can silently lose $100-$1000 before you notice.\n'));
-    
+
     process.exit(0);
   });
 
@@ -354,26 +376,26 @@ program
   .action(() => {
     const stats = detectionEngine.getStats(24);
     const hourlyStats = detectionEngine.getStats(1);
-    
+
     console.log(chalk.bold('\n📊 AI COST PROTECTION DASHBOARD\n'));
     console.log(chalk.gray('Real-time financial protection metrics\n'));
-    
+
     // Money Impact Section
     console.log(chalk.green('━'.repeat(50)));
     console.log(chalk.bold('💰 FINANCIAL IMPACT (24 hours)'));
     console.log(chalk.green('━'.repeat(50)));
-    
+
     const savings = stats.preventedCost;
     const riskLevel = savings > 10 ? 'HIGH' : savings > 1 ? 'MEDIUM' : 'LOW';
     const riskColor = savings > 10 ? chalk.red : savings > 1 ? chalk.yellow : chalk.green;
-    
+
     console.log(`${chalk.bold('Money Saved:')} ${chalk.green('$' + savings.toFixed(2))}`);
     console.log(`${chalk.bold('Protection Level:')} ${riskColor(riskLevel)}`);
     console.log(`${chalk.bold('Requests Analyzed:')} ${stats.totalRequests}`);
     console.log(`${chalk.bold('Threats Blocked:')} ${chalk.red(stats.blockedRequests.toString())}`);
     console.log(`${chalk.bold('Warnings Issued:')} ${chalk.yellow(stats.warnedRequests.toString())}`);
     console.log('');
-    
+
     // Hourly Activity
     console.log(chalk.blue('━'.repeat(50)));
     console.log(chalk.bold('📈 HOURLY ACTIVITY'));
@@ -382,12 +404,12 @@ program
     console.log(`${chalk.bold('Last Hour Blocked:')} ${hourlyStats.blockedRequests}`);
     console.log(`${chalk.bold('Last Hour Saved:')} ${chalk.green('$' + hourlyStats.preventedCost.toFixed(2))}`);
     console.log('');
-    
+
     // Risk Patterns
     console.log(chalk.yellow('━'.repeat(50)));
     console.log(chalk.bold('🚨 TOP RISK PATTERNS DETECTED'));
     console.log(chalk.yellow('━'.repeat(50)));
-    
+
     if (stats.blockedRequests === 0) {
       console.log(chalk.green('✅ No threats detected - system is safe'));
     } else {
@@ -396,7 +418,7 @@ program
       console.log(chalk.red('• Anomalous request patterns'));
     }
     console.log('');
-    
+
     // Bottom line
     console.log(chalk.green('═'.repeat(50)));
     console.log(chalk.bold('💡 WITHOUT THIS FIREWALL:'));
@@ -408,7 +430,7 @@ program
     console.log(chalk.green(`   Saved $${stats.preventedCost.toFixed(2)} by blocking threats`));
     console.log(chalk.green('═'.repeat(50)));
     console.log('');
-    
+
     process.exit(0);
   });
 
@@ -422,14 +444,14 @@ program
   .option('-c, --current', 'Show current budget status')
   .action((options) => {
     const config = new ConfigManager();
-    
+
     if (options.set) {
       const budget = parseFloat(options.set);
       if (isNaN(budget) || budget < 0) {
         console.log(chalk.red('❌ Invalid budget amount'));
         process.exit(1);
       }
-      
+
       config.updateConfig({ dailyBudget: budget });
       console.log(chalk.green(`✅ Daily budget set to $${budget.toFixed(2)}`));
       console.log('');
@@ -439,22 +461,20 @@ program
       console.log('');
       process.exit(0);
     }
-    
+
     // Show current budget status
     const cfg = config.getConfig();
     const stats = detectionEngine.getStats(24);
-    
+
     console.log(chalk.bold('\n💰 DAILY BUDGET PROTECTION\n'));
     console.log(`${chalk.bold('Daily Budget Limit:')} $${(cfg.dailyBudget || 50).toFixed(2)}`);
     console.log(`${chalk.bold('Current Usage (24h):')} $${stats.totalCost.toFixed(2)}`);
-    
-    const percentUsed = ((cfg.dailyBudget || 50) > 0) 
-      ? (stats.totalCost / (cfg.dailyBudget || 50)) * 100 
-      : 0;
-    
+
+    const percentUsed = (cfg.dailyBudget || 50) > 0 ? (stats.totalCost / (cfg.dailyBudget || 50)) * 100 : 0;
+
     const percentColor = percentUsed > 90 ? chalk.red : percentUsed > 70 ? chalk.yellow : chalk.green;
     console.log(`${chalk.bold('Budget Used:')} ${percentColor(percentUsed.toFixed(1) + '%')}`);
-    
+
     if (percentUsed >= 100) {
       console.log(chalk.red('\n🚨 BUDGET LIMIT REACHED'));
       console.log(chalk.red('Next requests will be BLOCKED until tomorrow'));
@@ -464,7 +484,7 @@ program
     } else {
       console.log(chalk.green('\n✅ Within safe budget range'));
     }
-    
+
     console.log('');
     console.log(chalk.gray('Use --set <amount> to change daily budget'));
     console.log('');
@@ -483,21 +503,21 @@ program
     const fs = require('fs');
     const path = require('path');
     const { execSync } = require('child_process');
-    
+
     const gitDir = path.join(process.cwd(), '.git');
     const hooksDir = path.join(gitDir, 'hooks');
-    
+
     if (!fs.existsSync(gitDir)) {
       console.log(chalk.red('❌ Not a git repository'));
       console.log(chalk.gray('Run this command from a git repository root'));
       process.exit(1);
     }
-    
+
     if (options.remove) {
       // Remove hooks
       const preCommitPath = path.join(hooksDir, 'pre-commit');
       const prePushPath = path.join(hooksDir, 'pre-push');
-      
+
       if (fs.existsSync(preCommitPath)) {
         fs.unlinkSync(preCommitPath);
         console.log(chalk.green('✅ Removed pre-commit hook'));
@@ -508,12 +528,12 @@ program
       }
       process.exit(0);
     }
-    
+
     // Install hooks
     if (!fs.existsSync(hooksDir)) {
       fs.mkdirSync(hooksDir, { recursive: true });
     }
-    
+
     // Pre-commit hook - scan staged files
     const preCommitScript = `#!/bin/sh
 # AI Execution Firewall - Pre-commit Hook
@@ -543,7 +563,7 @@ done
 echo "✅ AI Firewall pre-commit check complete"
 exit 0
 `;
-    
+
     // Pre-push hook - run full check
     const prePushScript = `#!/bin/sh
 # AI Execution Firewall - Pre-push Hook
@@ -570,10 +590,10 @@ fi
 
 exit 0
 `;
-    
+
     fs.writeFileSync(path.join(hooksDir, 'pre-commit'), preCommitScript, { mode: 0o755 });
     fs.writeFileSync(path.join(hooksDir, 'pre-push'), prePushScript, { mode: 0o755 });
-    
+
     console.log(chalk.bold('\n🪝 AI FIREWALL GIT HOOKS INSTALLED\n'));
     console.log(chalk.green('✅ pre-commit hook installed'));
     console.log(chalk.green('✅ pre-push hook installed'));
@@ -600,13 +620,13 @@ program
     const failOn = options.failOn.toUpperCase();
     const scanPath = options.scan;
     const maxBudget = parseFloat(options.budget);
-    
+
     console.log(chalk.bold('\n🔍 AI FIREWALL CI/CD CHECK\n'));
     console.log(chalk.gray(`Fail on: ${failOn} risk`));
     console.log(chalk.gray(`Scan path: ${scanPath}`));
     console.log(chalk.gray(`Budget limit: $${maxBudget}`));
     console.log('');
-    
+
     // Get stats from last run
     const stats = detectionEngine.getStats(1); // Last hour (CI context)
     const comparison = {
@@ -614,12 +634,12 @@ program
       wouldHaveLost: stats.totalCost + stats.preventedCost,
       actualSpend: stats.totalCost,
       blockedCount: stats.blockedRequests,
-      allowedCount: stats.totalRequests - stats.blockedRequests
+      allowedCount: stats.totalRequests - stats.blockedRequests,
     };
-    
+
     // Check for HIGH risk blocks
     const highRiskBlocks = stats.blockedRequests > 0;
-    
+
     console.log(chalk.bold('📊 SCAN RESULTS'));
     console.log('━'.repeat(40));
     console.log(`Requests checked: ${stats.totalRequests}`);
@@ -627,11 +647,11 @@ program
     console.log(`Allowed: ${comparison.allowedCount}`);
     console.log(`Cost prevented: $${comparison.saved.toFixed(2)}`);
     console.log('');
-    
+
     // Determine pass/fail
     let passed = true;
     let exitCode = 0;
-    
+
     if (failOn === 'LOW' && (stats.blockedRequests > 0 || stats.warnedRequests > 0)) {
       passed = false;
       exitCode = 1;
@@ -643,15 +663,15 @@ program
       passed = false;
       exitCode = 1;
     }
-    
+
     if (comparison.actualSpend > maxBudget) {
       console.log(chalk.red(`\n❌ BUDGET EXCEEDED: $${comparison.actualSpend.toFixed(2)} > $${maxBudget}`));
       passed = false;
       exitCode = 1;
     }
-    
+
     console.log(chalk.bold('━'.repeat(40)));
-    
+
     if (passed) {
       console.log(chalk.green('\n✅ CI CHECK PASSED'));
       console.log(chalk.green(`No ${failOn} risk detections found`));
@@ -662,7 +682,7 @@ program
         console.log(chalk.red('Budget limit exceeded'));
       }
     }
-    
+
     console.log('');
     process.exit(exitCode);
   });
@@ -677,9 +697,9 @@ program
   .action(async (options) => {
     const fs = require('fs');
     const path = require('path');
-    
+
     console.log(chalk.bold('\n🛡️  AI EXECUTION FIREWALL - PROJECT INIT\n'));
-    
+
     // Check for existing config
     const configPath = path.join(process.cwd(), 'aifw.config.json');
     if (fs.existsSync(configPath) && !options.yes) {
@@ -687,19 +707,63 @@ program
       console.log(chalk.gray('Use --yes to overwrite or manually edit the file'));
       process.exit(1);
     }
-    
+
     // Create default config
     const defaultConfig = {
-      mode: 'block',
-      dailyBudget: 50,
-      riskThreshold: 70,
-      spikeLimit: 20,
-      duplicateWindow: 30,
-      version: '1.0.0'
+      trustMode: 'block',
+      version: '1.1.0',
+      privacy: {
+        promptStorage: 'hash',
+        retentionDays: 30,
+        redactPatterns: [
+          '(sk-[A-Za-z0-9_-]{20,})',
+          '([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})',
+          '((?:\\d[ -]*?){13,19})',
+        ],
+      },
+      storage: {
+        adapter: 'jsonl',
+      },
+      budgets: {
+        perRequestUsd: 1,
+        dailyUsd: 50,
+        monthlyUsd: 1000,
+      },
+      thresholds: {
+        killSwitchScore: 90,
+        loopCount: 3,
+        loopWindowMs: 30000,
+        duplicateWindowMs: 3600000,
+        costSpikeUsd: 0.05,
+        contextRatio: 5,
+        fuzzySimilarity: 0.7,
+      },
+      policies: [
+        {
+          id: 'default-production-agent',
+          description: 'Example scoped policy for one production agent',
+          scope: { appId: 'my-app', agentId: 'primary-agent' },
+          budgets: {
+            perRequestUsd: 0.5,
+            dailyUsd: 25,
+            monthlyUsd: 500,
+            workflowUsd: 10,
+            tokensPerRequest: 20000,
+          },
+        },
+      ],
+      alerts: {
+        enabled: false,
+        channels: [],
+      },
+      metadata: {
+        required: [],
+        passthroughHeaders: ['x-request-id', 'x-tenant-id', 'x-user-id', 'x-session-id', 'x-agent-id', 'x-workflow-id'],
+      },
     };
-    
+
     fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
-    
+
     // Create sample integration file
     const samplePath = path.join(process.cwd(), 'aifw.example.js');
     const sampleCode = `// AI Execution Firewall - Sample Integration
@@ -711,6 +775,11 @@ const openai = withFirewall(new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 }), {
   trustMode: 'block', // 'monitor' | 'warn' | 'block'
+  metadata: {
+    orgId: 'my-org',
+    appId: 'my-app',
+    agentId: 'primary-agent'
+  },
   
   // Real-time alerts
   onBlock: (reason, dangerScore, estimatedCost) => {
@@ -730,25 +799,30 @@ const openai = withFirewall(new OpenAI({
 // Use normally - firewall intercepts automatically
 async function generateText(prompt) {
   const response = await openai.chat.completions.create({
-    model: 'gpt-4',
-    messages: [{ role: 'user', content: prompt }]
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: prompt }],
+    metadata: {
+      userId: 'user_123',
+      sessionId: 'session_456',
+      workflowId: 'ticket-reply'
+    }
   });
   return response.choices[0].message.content;
 }
 
 module.exports = { generateText };
 `;
-    
+
     if (!fs.existsSync(samplePath)) {
       fs.writeFileSync(samplePath, sampleCode);
     }
-    
+
     // Create .github/workflows if it doesn't exist
     const githubDir = path.join(process.cwd(), '.github', 'workflows');
     if (!fs.existsSync(githubDir)) {
       fs.mkdirSync(githubDir, { recursive: true });
     }
-    
+
     const workflowPath = path.join(githubDir, 'aifw.yml');
     const workflowContent = `name: AI Firewall Check
 
@@ -778,11 +852,11 @@ jobs:
         env:
           OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
 `;
-    
+
     if (!fs.existsSync(workflowPath)) {
       fs.writeFileSync(workflowPath, workflowContent);
     }
-    
+
     console.log(chalk.green('✅ AI Firewall initialized!\n'));
     console.log(chalk.bold('Created files:'));
     console.log(chalk.cyan('  • aifw.config.json - Configuration'));
@@ -817,12 +891,12 @@ program
     console.log(chalk.bold('💸 WITHOUT FIREWALL:'));
     console.log(chalk.red(`   You would have spent $${summary.totalWouldHaveLost.toFixed(2)}`));
     console.log('');
-    
+
     console.log(chalk.bold('🛡️ WITH FIREWALL:'));
     console.log(chalk.green(`   You spent $${summary.totalSpent.toFixed(2)}`));
     console.log(chalk.green.bold(`   Saved $${summary.totalSaved.toFixed(2)}`));
     console.log('');
-    
+
     console.log(chalk.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
     console.log(chalk.bold('SESSION STATISTICS'));
     console.log(chalk.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
@@ -833,11 +907,11 @@ program
     console.log(`${chalk.bold('Blocked:')} ${chalk.red(summary.totalBlocked)}`);
     console.log(`${chalk.bold('Protection Rate:')} ${summary.protectionRate.toFixed(1)}%`);
     console.log('');
-    
+
     if (summary.totalSaved > 0) {
       console.log(chalk.green.bold(`💰 Total Savings: $${summary.totalSaved.toFixed(2)}`));
     }
-    
+
     console.log('');
     console.log(chalk.gray('Run "aifw dashboard" for detailed metrics'));
     console.log('');

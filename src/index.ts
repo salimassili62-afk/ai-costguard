@@ -3,6 +3,7 @@ export * from './token-counter';
 export * from './logger';
 export * from './proxy';
 export * from './wrapper';
+export * from './storage';
 
 // Core exports - explicit to avoid conflict with config.Decision
 export { DetectionEngine, detectionEngine, DetectionResult, AnalyzeInput } from './core/DetectionEngine';
@@ -13,6 +14,9 @@ export { CostLedger, costLedger, CostLedgerEntry, CostEstimate, CostActual } fro
 export { AuditTrail, auditTrail, AuditEntry, AuditStats } from './core/AuditTrail';
 export { PricingConfig, pricingConfig, ModelPricing, TokenUsage, CostCalculation } from './core/PricingConfig';
 export { SessionStatsManager, sessionStats, SessionStats, DailyStats } from './core/SessionStats';
+export { PolicyEngine, policyEngine, BudgetStatus, EffectivePolicy, PolicyEvaluationResult } from './core/PolicyEngine';
+export { AlertManager, alertManager, FirewallAlert } from './core/AlertManager';
+export { FirewallMetadata, TokenBreakdown } from './core/types';
 
 export { AIExecutionFirewall } from './wrapper';
 

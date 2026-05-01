@@ -1,38 +1,29 @@
 /**
  * DetectionEngine.ts - SINGLE Core Detection Engine
- * 
- * This is the ONLY place where detection happens in AI Execution Firewall.
- * All detection logic lives here. CLI, SDK, Proxy just call this engine.
- * 
- * Architecture:
- *   Input (CLI/SDK/Proxy) → DetectionEngine.analyze() → Result
- * 
- * Detection Priority:
- *   1. Loop detection (3+ identical in 30s)
- *   2. Duplicate detection (1+ identical in 1h)
- *   3. Cost spike ($0.05+)
- *   4. Context explosion (5x+ ratio)
- *   5. Fuzzy duplicate (70%+ similarity)
+ *
+ * Input (CLI/SDK/Proxy) -> DetectionEngine.analyze() -> Result
  */
 
 import { randomUUID } from 'crypto';
 import { stateStore, RequestRecord } from './StateStore';
-import { DETECTION_THRESHOLDS, TIME_WINDOWS, DECISIONS, ALERT_CATEGORIES } from '../config/constants';
-import { ConfigManager } from '../config';
+import { DETECTION_THRESHOLDS, TIME_WINDOWS } from '../config/constants';
+import { policyEngine } from './PolicyEngine';
+import { FirewallMetadata, TokenBreakdown } from './types';
+import { alertManager } from './AlertManager';
 
 export type Decision = 'allow' | 'warn' | 'block';
-export type Category = 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'safe' | 'invalid';
+export type Category = 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'budget' | 'safe' | 'invalid';
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface DetectionResult {
   decision: Decision;
-  dangerScore: number; // 0-100
-  riskLevel: RiskLevel; // LOW/MEDIUM/HIGH/CRITICAL
+  dangerScore: number;
+  riskLevel: RiskLevel;
   category: Category;
   reason: string;
-  saved: number; // Money saved by this decision
-  wouldHaveLost: number; // What would have been lost without firewall
+  saved: number;
+  wouldHaveLost: number;
   metadata: {
     promptHash: string;
     duplicateCount: number;
@@ -40,13 +31,11 @@ export interface DetectionResult {
     estimatedCost: number;
     similarity?: number;
     contextRatio?: number;
+    requestId?: string;
+    policyId?: string;
   };
 }
 
-/**
- * Map danger score (0-100) to risk level
- * 0-30: LOW, 31-70: MEDIUM, 71-100: HIGH, 90+: CRITICAL (kill switch)
- */
 function getRiskLevel(dangerScore: number): RiskLevel {
   if (dangerScore >= 90) return 'CRITICAL';
   if (dangerScore >= 71) return 'HIGH';
@@ -61,6 +50,8 @@ export interface AnalyzeInput {
   context?: string;
   trustMode?: 'monitor' | 'warn' | 'block';
   override?: boolean;
+  metadata?: FirewallMetadata;
+  tokens?: TokenBreakdown;
   onBlock?: (reason: string, dangerScore: number, estimatedCost: number) => void;
   onWarn?: (reason: string, dangerScore: number, estimatedCost: number) => void;
   onSpike?: (requests: number, timeWindow: number) => void;
@@ -72,10 +63,6 @@ export interface AlertHooks {
   onSpike?: (requests: number, timeWindow: number) => void;
 }
 
-/**
- * DetectionEngine - Singleton
- * The single brain of AI Execution Firewall
- */
 export class DetectionEngine {
   private static instance: DetectionEngine;
   private readonly KILL_SWITCH_THRESHOLD = DETECTION_THRESHOLDS.KILL_SWITCH;
@@ -95,20 +82,22 @@ export class DetectionEngine {
     return DetectionEngine.instance;
   }
 
-  /**
-   * Main entry point - analyze a request
-   * This is the ONLY detection method. All interfaces call this.
-   */
   analyze(input: AnalyzeInput): DetectionResult {
     const { model, prompt, estimatedCost, context, trustMode = 'warn', override = false } = input;
+    const requestId = String(input.metadata?.requestId || randomUUID());
+    const metadata: FirewallMetadata = {
+      ...(input.metadata || {}),
+      requestId,
+      model,
+    };
 
-    // Input validation
     if (!prompt || typeof prompt !== 'string' || prompt.trim() === '') {
       return this.createResult('block', 100, 'invalid', 'Invalid prompt: must be a non-empty string', {
         promptHash: '',
         duplicateCount: 0,
         loopCount: 0,
-        estimatedCost: 0
+        estimatedCost: 0,
+        requestId,
       });
     }
 
@@ -117,295 +106,244 @@ export class DetectionEngine {
         promptHash: '',
         duplicateCount: 0,
         loopCount: 0,
-        estimatedCost: 0
+        estimatedCost: 0,
+        requestId,
       });
     }
 
-    // Override - allow anything
     if (override) {
       const hash = stateStore.generateHash(prompt, context);
-      this.recordRequest(input, hash, false, 0, 'safe', 'Override enabled');
+      this.recordRequest(input, hash, false, 0, 'safe', 'Override enabled', 'allow', metadata);
       return this.createResult('allow', 0, 'safe', 'Override enabled - request allowed', {
         promptHash: hash,
         duplicateCount: 0,
         loopCount: 0,
-        estimatedCost
+        estimatedCost,
+        requestId,
       });
     }
 
-    // Generate hash
     const promptHash = stateStore.generateHash(prompt, context);
+    const effectivePolicy = policyEngine.getEffectivePolicy(metadata);
 
-    // Check 1: Runaway loop (CRITICAL - highest priority)
     const loopCheck = this.detectLoop(promptHash);
     if (loopCheck.isLoop) {
-      // Score: 90 base + 3 per request beyond threshold, capped at 100
-      // r3: 90 + 3*(3-2) = 93, r4: 90 + 3*(4-2) = 96, etc.
       const dangerScore = Math.min(100, 90 + (loopCheck.count - 2) * 3);
-      this.recordRequest(input, promptHash, true, dangerScore, 'loop', loopCheck.reason);
-      return this.createResult(
-        'block',
-        dangerScore,
-        'loop',
-        loopCheck.reason,
-        { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
-      );
+      this.recordRequest(input, promptHash, true, dangerScore, 'loop', loopCheck.reason, 'block', metadata);
+      return this.createResult('block', dangerScore, 'loop', loopCheck.reason, {
+        promptHash,
+        duplicateCount: 0,
+        loopCount: loopCheck.count,
+        estimatedCost,
+        requestId,
+        policyId: effectivePolicy.id,
+      });
     }
 
-    // Check 2: Exact duplicate
     const duplicateCheck = this.detectDuplicate(promptHash);
     if (duplicateCheck.isDuplicate) {
-      // Score: 30 base + 10 per duplicate, capped at 90
-      // First duplicate = 40 (warn), Second = 50 (block threshold)
       const dangerScore = Math.min(90, 30 + duplicateCheck.count * 10);
       const decision = this.determineDecision(dangerScore, trustMode);
-      
-      // Trigger hooks if provided
-      if (decision === 'block' && input.onBlock) {
-        input.onBlock(duplicateCheck.reason, dangerScore, estimatedCost);
-      } else if (decision === 'warn' && input.onWarn) {
-        input.onWarn(duplicateCheck.reason, dangerScore, estimatedCost);
-      }
-      
-      this.recordRequest(input, promptHash, true, dangerScore, 'duplicate', duplicateCheck.reason);
-      return this.createResult(
-        decision,
-        dangerScore,
-        'duplicate',
-        duplicateCheck.reason,
-        { promptHash, duplicateCount: duplicateCheck.count, loopCount: loopCheck.count, estimatedCost }
-      );
+      this.triggerHooks(decision, 'duplicate', duplicateCheck.reason, dangerScore, estimatedCost, input);
+      this.recordRequest(input, promptHash, true, dangerScore, 'duplicate', duplicateCheck.reason, decision, metadata);
+      return this.createResult(decision, dangerScore, 'duplicate', duplicateCheck.reason, {
+        promptHash,
+        duplicateCount: duplicateCheck.count,
+        loopCount: loopCheck.count,
+        estimatedCost,
+        requestId,
+        policyId: effectivePolicy.id,
+      });
     }
 
-    // Check 3: Cost spike
+    const policyCheck = policyEngine.evaluate({
+      model,
+      estimatedCost,
+      metadata,
+      tokens: input.tokens,
+    });
+    const isLegacyDefaultPerRequest =
+      policyCheck.effectivePolicy.id === 'default' && policyCheck.reason.startsWith('PER-REQUEST');
+    if (policyCheck.decision !== 'allow' && !isLegacyDefaultPerRequest) {
+      const dangerScore = policyCheck.dangerScore;
+      const decision = policyCheck.decision === 'block' ? 'block' : this.determineDecision(dangerScore, trustMode);
+      this.triggerHooks(decision, 'budget', policyCheck.reason, dangerScore, estimatedCost, input);
+      this.recordRequest(input, promptHash, true, dangerScore, 'budget', policyCheck.reason, decision, metadata);
+      return this.createResult(decision, dangerScore, 'budget', policyCheck.reason, {
+        promptHash,
+        duplicateCount: 0,
+        loopCount: loopCheck.count,
+        estimatedCost,
+        requestId,
+        policyId: policyCheck.effectivePolicy.id,
+      });
+    }
+
     const costCheck = this.detectCostSpike(estimatedCost);
     if (costCheck.isSpike) {
       const dangerScore = costCheck.score;
       const decision = this.determineDecision(dangerScore, trustMode);
-      
-      // Trigger onSpike hook if provided
       if (input.onSpike) {
-        input.onSpike(1, 60); // 1 spike detected in 60s window
+        input.onSpike(1, 60);
       }
-      
-      this.recordRequest(input, promptHash, true, dangerScore, 'spike', costCheck.reason);
-      return this.createResult(
-        decision,
-        dangerScore,
-        'spike',
-        costCheck.reason,
-        { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
-      );
+      this.triggerHooks(decision, 'spike', costCheck.reason, dangerScore, estimatedCost, input);
+      this.recordRequest(input, promptHash, true, dangerScore, 'spike', costCheck.reason, decision, metadata);
+      return this.createResult(decision, dangerScore, 'spike', costCheck.reason, {
+        promptHash,
+        duplicateCount: 0,
+        loopCount: loopCheck.count,
+        estimatedCost,
+        requestId,
+        policyId: effectivePolicy.id,
+      });
     }
 
-    // Check 3.5: Daily budget protection
-    const budgetCheck = this.detectBudgetLimit(estimatedCost);
-    if (budgetCheck.wouldExceed) {
-      const dangerScore = 75; // High score for budget protection
-      const reason = `💰 DAILY BUDGET EXCEEDED: Would exceed $${budgetCheck.budget.toFixed(2)} daily limit`;
-      
-      // Trigger onBlock hook if provided
-      if (input.onBlock) {
-        input.onBlock(reason, dangerScore, estimatedCost);
-      }
-      
-      this.recordRequest(input, promptHash, true, dangerScore, 'spike', reason);
-      return this.createResult(
-        'block',
-        dangerScore,
-        'spike',
-        reason,
-        { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
-      );
-    }
-
-    // Check 4: Context explosion
     if (context) {
       const contextCheck = this.detectContextExplosion(prompt, context);
       if (contextCheck.isExplosion) {
         const dangerScore = contextCheck.score;
         const decision = this.determineDecision(dangerScore, trustMode);
-        this.recordRequest(input, promptHash, true, dangerScore, 'context', contextCheck.reason);
-        return this.createResult(
-          decision,
-          dangerScore,
-          'context',
-          contextCheck.reason,
-          { 
-            promptHash, 
-            duplicateCount: 0, 
-            loopCount: loopCheck.count, 
-            estimatedCost,
-            contextRatio: contextCheck.ratio 
-          }
-        );
+        this.triggerHooks(decision, 'context', contextCheck.reason, dangerScore, estimatedCost, input);
+        this.recordRequest(input, promptHash, true, dangerScore, 'context', contextCheck.reason, decision, metadata);
+        return this.createResult(decision, dangerScore, 'context', contextCheck.reason, {
+          promptHash,
+          duplicateCount: 0,
+          loopCount: loopCheck.count,
+          estimatedCost,
+          contextRatio: contextCheck.ratio,
+          requestId,
+          policyId: effectivePolicy.id,
+        });
       }
     }
 
-    // Check 5: Fuzzy duplicate
     const fuzzyCheck = this.detectFuzzyDuplicate(prompt);
     if (fuzzyCheck.isFuzzy) {
       const dangerScore = Math.min(70, 30 + fuzzyCheck.similarity * 40);
       const decision = this.determineDecision(dangerScore, trustMode);
-      this.recordRequest(input, promptHash, true, dangerScore, 'fuzzy_duplicate', fuzzyCheck.reason);
-      return this.createResult(
-        decision,
+      this.triggerHooks(decision, 'fuzzy_duplicate', fuzzyCheck.reason, dangerScore, estimatedCost, input);
+      this.recordRequest(
+        input,
+        promptHash,
+        true,
         dangerScore,
         'fuzzy_duplicate',
         fuzzyCheck.reason,
-        { 
-          promptHash, 
-          duplicateCount: 0, 
-          loopCount: loopCheck.count, 
-          estimatedCost,
-          similarity: fuzzyCheck.similarity 
-        }
+        decision,
+        metadata
       );
+      return this.createResult(decision, dangerScore, 'fuzzy_duplicate', fuzzyCheck.reason, {
+        promptHash,
+        duplicateCount: 0,
+        loopCount: loopCheck.count,
+        estimatedCost,
+        similarity: fuzzyCheck.similarity,
+        requestId,
+        policyId: effectivePolicy.id,
+      });
     }
 
-    // Safe request
-    this.recordRequest(input, promptHash, false, 0, 'safe', 'Request is safe');
-    return this.createResult(
-      'allow',
-      0,
-      'safe',
-      'Request is safe',
-      { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
-    );
+    this.recordRequest(input, promptHash, false, 0, 'safe', 'Request is safe', 'allow', metadata);
+    return this.createResult('allow', 0, 'safe', 'Request is safe', {
+      promptHash,
+      duplicateCount: 0,
+      loopCount: loopCheck.count,
+      estimatedCost,
+      requestId,
+      policyId: effectivePolicy.id,
+    });
   }
 
-  /**
-   * Detect runaway loops (3+ identical requests in 30 seconds)
-   */
   private detectLoop(promptHash: string): { isLoop: boolean; count: number; reason: string } {
     const recent = stateStore.getRecentByHash(promptHash, this.LOOP_WINDOW);
-    // KILL SWITCH: Trigger when total requests (existing + current) >= threshold
-    // Need 3 identical requests in 30 seconds to trigger
-    const totalCount = recent.length + 1; // +1 for current request
+    const totalCount = recent.length + 1;
     if (totalCount >= this.LOOP_THRESHOLD) {
       return {
         isLoop: true,
         count: totalCount,
-        reason: `🔴 KILL SWITCH: RUNAWAY LOOP - ${totalCount} identical requests in 30 seconds`
+        reason: `KILL SWITCH: RUNAWAY LOOP - ${totalCount} identical requests in 30 seconds`,
       };
     }
-    
+
     return { isLoop: false, count: recent.length, reason: '' };
   }
 
-  /**
-   * Detect exact duplicates (1+ identical requests in 1 hour)
-   * Any existing request with same promptHash → duplicate
-   */
   private detectDuplicate(promptHash: string): { isDuplicate: boolean; count: number; reason: string } {
     const recent = stateStore.getRecentByHash(promptHash, this.DUPLICATE_WINDOW);
-    
-    // If ANY history item has same promptHash → duplicate
     if (recent.length > 0) {
       return {
         isDuplicate: true,
         count: recent.length,
-        reason: `💸 DUPLICATE: This exact prompt was sent ${recent.length} time(s) in the last hour`
+        reason: `DUPLICATE: This exact prompt was sent ${recent.length} time(s) in the last hour`,
       };
     }
-    
+
     return { isDuplicate: false, count: recent.length, reason: '' };
   }
 
-  /**
-   * Detect cost spikes ($0.05+)
-   */
   private detectCostSpike(estimatedCost: number): { isSpike: boolean; score: number; reason: string } {
     if (estimatedCost >= this.COST_THRESHOLD) {
       const baseScore = 30;
       const costMultiplier = (estimatedCost - 0.05) * 50;
-      // Floor to integer for deterministic output
       const score = Math.min(100, Math.floor(baseScore + costMultiplier));
 
       return {
         isSpike: true,
         score,
-        reason: `💸 COST SPIKE: Single request costs $${estimatedCost.toFixed(2)}`
+        reason: `COST SPIKE: Single request costs $${estimatedCost.toFixed(2)}`,
       };
     }
 
     return { isSpike: false, score: 0, reason: '' };
   }
 
-  /**
-   * Detect if request would exceed daily budget limit
-   */
-  private detectBudgetLimit(estimatedCost: number): { wouldExceed: boolean; budget: number; currentSpend: number } {
-    const config = new ConfigManager();
-    const dailyBudget = config.dailyBudget;
-
-    // Get current daily spending from stats
-    const stats = stateStore.getStats(24);
-    const currentSpend = stats.totalCost;
-    const wouldExceed = (currentSpend + estimatedCost) > dailyBudget;
-
-    return { wouldExceed, budget: dailyBudget, currentSpend };
-  }
-
-  /**
-   * Detect context explosion (context 5x+ larger than prompt)
-   */
   private detectContextExplosion(
-    prompt: string, 
+    prompt: string,
     context: string
   ): { isExplosion: boolean; score: number; reason: string; ratio: number } {
     const promptLength = prompt.length;
     const contextLength = context.length;
     const ratio = contextLength / (promptLength || 1);
-    
-    // Strict threshold: 5x ratio required for detection
+
     if (ratio >= this.CONTEXT_RATIO_THRESHOLD) {
-      // Floor ratio to 2 decimals for deterministic output
       const roundedRatio = Math.floor(ratio * 100) / 100;
       const score = Math.min(75, Math.floor(25 + Math.log(ratio) * 15));
-      
+
       return {
         isExplosion: true,
         score,
-        reason: `💸 CONTEXT EXPLOSION: Context is ${roundedRatio.toFixed(2)}x larger than prompt`,
-        ratio: roundedRatio
+        reason: `CONTEXT EXPLOSION: Context is ${roundedRatio.toFixed(2)}x larger than prompt`,
+        ratio: roundedRatio,
       };
     }
-    
+
     return { isExplosion: false, score: 0, reason: '', ratio };
   }
 
-  /**
-   * Detect fuzzy duplicates (70%+ similarity to recent requests)
-   */
-  private detectFuzzyDuplicate(prompt: string): { 
-    isFuzzy: boolean; 
-    similarity: number; 
-    reason: string 
+  private detectFuzzyDuplicate(prompt: string): {
+    isFuzzy: boolean;
+    similarity: number;
+    reason: string;
   } {
     const recentRecords = stateStore.getAllRecent(this.DUPLICATE_WINDOW);
-    
+
     for (const record of recentRecords) {
-      // Skip exact matches (already handled by duplicate detection)
       if (record.prompt === prompt) continue;
-      
+
       const similarity = stateStore.calculateSimilarity(prompt, record.prompt);
-      
+
       if (similarity >= this.FUZZY_THRESHOLD) {
         return {
           isFuzzy: true,
           similarity,
-          reason: `⚠️ SIMILAR PROMPT: ${(similarity * 100).toFixed(0)}% similar to a recent request`
+          reason: `SIMILAR PROMPT: ${(similarity * 100).toFixed(0)}% similar to a recent request`,
         };
       }
     }
-    
+
     return { isFuzzy: false, similarity: 0, reason: '' };
   }
 
-  /**
-   * Determine decision based on danger score and trust mode
-   */
   private determineDecision(dangerScore: number, trustMode: string): Decision {
     if (dangerScore >= this.KILL_SWITCH_THRESHOLD) return 'block';
     if (trustMode === 'monitor') return 'allow';
@@ -414,9 +352,31 @@ export class DetectionEngine {
     return 'allow';
   }
 
-  /**
-   * Create result object
-   */
+  private triggerHooks(
+    decision: Decision,
+    category: Category,
+    reason: string,
+    dangerScore: number,
+    estimatedCost: number,
+    input: AnalyzeInput
+  ): void {
+    alertManager.notify({
+      decision,
+      riskLevel: getRiskLevel(dangerScore),
+      dangerScore,
+      category,
+      reason,
+      estimatedCost,
+      metadata: input.metadata,
+    });
+
+    if (decision === 'block' && input.onBlock) {
+      input.onBlock(reason, dangerScore, estimatedCost);
+    } else if (decision === 'warn' && input.onWarn) {
+      input.onWarn(reason, dangerScore, estimatedCost);
+    }
+  }
+
   private createResult(
     decision: Decision,
     dangerScore: number,
@@ -424,20 +384,15 @@ export class DetectionEngine {
     reason: string,
     metadata: DetectionResult['metadata']
   ): DetectionResult {
-    // Normalize dangerScore to integer (0-100) using floor
     const normalizedScore = Math.max(0, Math.min(100, Math.floor(dangerScore)));
     const riskLevel = getRiskLevel(normalizedScore);
-    
-    // Calculate financial impact (saved / wouldHaveLost)
     const saved = decision === 'block' ? metadata.estimatedCost : 0;
-    
-    // Get historical wouldHaveLost from stats and add this request
+
     const stats = stateStore.getStats(24);
-    const historicalBlockedCost = stats.blockedRequests > 0 
-      ? stats.totalCost / (stats.totalRequests || 1) * stats.blockedRequests 
-      : 0;
+    const historicalBlockedCost =
+      stats.blockedRequests > 0 ? (stats.totalCost / (stats.totalRequests || 1)) * stats.blockedRequests : 0;
     const wouldHaveLost = stats.totalCost + historicalBlockedCost + saved;
-    
+
     return {
       decision,
       dangerScore: normalizedScore,
@@ -446,20 +401,19 @@ export class DetectionEngine {
       reason,
       saved: Math.round(saved * 10000) / 10000,
       wouldHaveLost: Math.round(wouldHaveLost * 10000) / 10000,
-      metadata
+      metadata,
     };
   }
 
-  /**
-   * Record request to state store
-   */
   private recordRequest(
     input: AnalyzeInput,
     promptHash: string,
     isDangerous: boolean,
     dangerScore: number,
     category: Category,
-    reason: string
+    reason: string,
+    decision: Decision,
+    metadata: FirewallMetadata
   ): void {
     const record: RequestRecord = {
       id: randomUUID(),
@@ -471,43 +425,42 @@ export class DetectionEngine {
       dangerScore,
       isDangerous,
       category,
-      wasBlocked: isDangerous && dangerScore >= 50,
-      wasWarned: isDangerous,
+      wasBlocked: decision === 'block',
+      wasWarned: decision === 'warn',
       reason,
-      context: input.context
+      context: input.context,
+      metadata,
+      tokens: input.tokens,
+      decision,
     };
-    
+
     stateStore.addRecord(record);
   }
 
-  /**
-   * Get statistics (for report command)
-   */
   getStats(hours: number = 24) {
     return stateStore.getStats(hours);
   }
 
-  /**
-   * Get blocked requests (for blocked command)
-   */
   getBlocked(limit: number = 10) {
     return stateStore.getBlocked(limit);
   }
 
-  /**
-   * Clear all state (for testing)
-   */
   clear(): void {
     stateStore.clear();
   }
 
-  /**
-   * Reset state (for testing) - fully restore initial state
-   */
   reset(): void {
-    stateStore.reset(); // Clear cache, disk, and reinitialize
+    stateStore.reset();
+  }
+
+  getBudgetStatus(metadata: FirewallMetadata = {}) {
+    return policyEngine.getBudgetStatus(metadata);
+  }
+
+  explainDecision(result: DetectionResult): string {
+    const request = result.metadata.requestId ? ` request ${result.metadata.requestId}` : '';
+    return `AIFW ${result.decision}ed${request} because ${result.reason}. Category=${result.category}, risk=${result.riskLevel.toLowerCase()}, score=${result.dangerScore}, saved=$${result.saved.toFixed(4)}.`;
   }
 }
 
-// Export singleton instance
 export const detectionEngine = DetectionEngine.getInstance();

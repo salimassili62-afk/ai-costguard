@@ -48,11 +48,11 @@ describe('Edge Cases and Boundary Tests', () => {
       const testCases = [
         { cost: 0.05, expectedScore: 30 },
         { cost: 0.06, expectedScore: 30 }, // 30 + 0.01*50 = 30.5 -> 30
-        { cost: 0.10, expectedScore: 32 }, // 30 + 0.05*50 = 32.5 -> 32
-        { cost: 0.50, expectedScore: 52 }, // 30 + 0.45*50 = 52.5 -> 52
-        { cost: 1.00, expectedScore: 77 }, // 30 + 0.95*50 = 77.5 -> 77
-        { cost: 1.50, expectedScore: 100 }, // capped
-        { cost: 5.00, expectedScore: 100 }, // capped
+        { cost: 0.1, expectedScore: 32 }, // 30 + 0.05*50 = 32.5 -> 32
+        { cost: 0.5, expectedScore: 52 }, // 30 + 0.45*50 = 52.5 -> 52
+        { cost: 1.0, expectedScore: 77 }, // 30 + 0.95*50 = 77.5 -> 77
+        { cost: 1.5, expectedScore: 100 }, // capped
+        { cost: 5.0, expectedScore: 100 }, // capped
       ];
 
       testCases.forEach(({ cost, expectedScore }) => {
@@ -332,10 +332,12 @@ describe('Edge Cases and Boundary Tests', () => {
       const responses = await Promise.all(promises);
 
       // Should not crash - all should get a response
-      expect(responses.every(r => r.status !== undefined)).toBe(true);
+      expect(responses.every((r) => r.status !== undefined)).toBe(true);
 
       // Most should be processed (some may be rate limited or unauthorized)
-      const successful = responses.filter(r => r.status === 200 || r.status === 403 || r.status === 401 || r.status === 429).length;
+      const successful = responses.filter(
+        (r) => r.status === 200 || r.status === 403 || r.status === 401 || r.status === 429
+      ).length;
       expect(successful).toBeGreaterThan(50);
     });
 

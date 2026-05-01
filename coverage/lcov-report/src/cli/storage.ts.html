@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/50</span>
+                <span class='fraction'>0/49</span>
             </div>
         
             
@@ -207,10 +207,7 @@
 <a name='L142'></a><a href='#L142'>142</a>
 <a name='L143'></a><a href='#L143'>143</a>
 <a name='L144'></a><a href='#L144'>144</a>
-<a name='L145'></a><a href='#L145'>145</a>
-<a name='L146'></a><a href='#L146'>146</a>
-<a name='L147'></a><a href='#L147'>147</a>
-<a name='L148'></a><a href='#L148'>148</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L145'></a><a href='#L145'>145</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -289,9 +286,6 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -407,14 +401,14 @@ function <span class="fstat-no" title="function not covered" >ensureStorage(</sp
  */
 <span class="cstat-no" title="statement not covered" >export function <span class="fstat-no" title="function not covered" >l</span>oadRequestHistory(</span>): CLIRequestRecord[] {
 <span class="cstat-no" title="statement not covered" >  ensureStorage();</span>
-  
+&nbsp;
 <span class="cstat-no" title="statement not covered" >  if (!fs.existsSync(HISTORY_FILE)) {</span>
 <span class="cstat-no" title="statement not covered" >    return [];</span>
   }
 &nbsp;
   const records: CLIRequestRecord[] = <span class="cstat-no" title="statement not covered" >[];</span>
   const lines = <span class="cstat-no" title="statement not covered" >fs.readFileSync(HISTORY_FILE, 'utf-8').split('\n');</span>
-  
+&nbsp;
 <span class="cstat-no" title="statement not covered" >  for (const line of lines) {</span>
 <span class="cstat-no" title="statement not covered" >    if (!line.trim()) <span class="cstat-no" title="statement not covered" >continue;</span></span>
 <span class="cstat-no" title="statement not covered" >    try {</span>
@@ -424,7 +418,7 @@ function <span class="fstat-no" title="function not covered" >ensureStorage(</sp
       // Skip invalid lines
     }
   }
-  
+&nbsp;
 <span class="cstat-no" title="statement not covered" >  return records;</span>
 }
 &nbsp;
@@ -434,11 +428,8 @@ function <span class="fstat-no" title="function not covered" >ensureStorage(</sp
 <span class="cstat-no" title="statement not covered" >export function <span class="fstat-no" title="function not covered" >g</span>etRecentRequestsByHash(</span>hash: string, windowMs: number = <span class="branch-0 cbranch-no" title="branch not covered" >30000)</span>: CLIRequestRecord[] {
   const now = <span class="cstat-no" title="statement not covered" >Date.now();</span>
   const allRecords = <span class="cstat-no" title="statement not covered" >loadRequestHistory();</span>
-  
-<span class="cstat-no" title="statement not covered" >  return allRecords.filter(<span class="fstat-no" title="function not covered" >r </span>=&gt; </span>
-<span class="cstat-no" title="statement not covered" >    r.promptHash === hash &amp;&amp; </span>
-    (now - r.timestamp) &lt; windowMs
-  );
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  return allRecords.filter(<span class="fstat-no" title="function not covered" >(r</span>) =&gt; <span class="cstat-no" title="statement not covered" >r.promptHash === hash &amp;&amp; now - r.timestamp &lt; windowMs)</span>;</span>
 }
 &nbsp;
 /**
@@ -447,8 +438,8 @@ function <span class="fstat-no" title="function not covered" >ensureStorage(</sp
 <span class="cstat-no" title="statement not covered" >export function <span class="fstat-no" title="function not covered" >g</span>etRecentRequests(</span>windowMs: number = <span class="branch-0 cbranch-no" title="branch not covered" >3600000)</span>: CLIRequestRecord[] {
   const now = <span class="cstat-no" title="statement not covered" >Date.now();</span>
   const allRecords = <span class="cstat-no" title="statement not covered" >loadRequestHistory();</span>
-  
-<span class="cstat-no" title="statement not covered" >  return allRecords.filter(<span class="fstat-no" title="function not covered" >r </span>=&gt; <span class="cstat-no" title="statement not covered" >(now - r.timestamp) &lt; windowMs)</span>;</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  return allRecords.filter(<span class="fstat-no" title="function not covered" >(r</span>) =&gt; <span class="cstat-no" title="statement not covered" >now - r.timestamp &lt; windowMs)</span>;</span>
 }
 &nbsp;
 /**
@@ -472,14 +463,14 @@ function <span class="fstat-no" title="function not covered" >ensureStorage(</sp
 } {
   const windowMs = <span class="cstat-no" title="statement not covered" >hours * 3600000;</span>
   const now = <span class="cstat-no" title="statement not covered" >Date.now();</span>
-  const records = <span class="cstat-no" title="statement not covered" >loadRequestHistory().filter(<span class="fstat-no" title="function not covered" >r </span>=&gt; <span class="cstat-no" title="statement not covered" >(now - r.timestamp) &lt; windowMs)</span>;</span>
-  
+  const records = <span class="cstat-no" title="statement not covered" >loadRequestHistory().filter(<span class="fstat-no" title="function not covered" >(r</span>) =&gt; <span class="cstat-no" title="statement not covered" >now - r.timestamp &lt; windowMs)</span>;</span>
+&nbsp;
 <span class="cstat-no" title="statement not covered" >  return {</span>
     totalRequests: records.length,
-    blockedRequests: records.filter(<span class="fstat-no" title="function not covered" >r </span>=&gt; <span class="cstat-no" title="statement not covered" >r.wasBlocked)</span>.length,
-    warnedRequests: records.filter(<span class="fstat-no" title="function not covered" >r </span>=&gt; <span class="cstat-no" title="statement not covered" >r.wasWarned &amp;&amp; !r.wasBlocked)</span>.length,
+    blockedRequests: records.filter(<span class="fstat-no" title="function not covered" >(r</span>) =&gt; <span class="cstat-no" title="statement not covered" >r.wasBlocked)</span>.length,
+    warnedRequests: records.filter(<span class="fstat-no" title="function not covered" >(r</span>) =&gt; <span class="cstat-no" title="statement not covered" >r.wasWarned &amp;&amp; !r.wasBlocked)</span>.length,
     totalCost: records.reduce(<span class="fstat-no" title="function not covered" >(s</span>um, r) =&gt; <span class="cstat-no" title="statement not covered" >sum + r.estimatedCost,</span> 0),
-    preventedCost: records.filter(<span class="fstat-no" title="function not covered" >r </span>=&gt; <span class="cstat-no" title="statement not covered" >r.wasBlocked)</span>.reduce(<span class="fstat-no" title="function not covered" >(s</span>um, r) =&gt; <span class="cstat-no" title="statement not covered" >sum + r.estimatedCost,</span> 0),
+    preventedCost: records.filter(<span class="fstat-no" title="function not covered" >(r</span>) =&gt; <span class="cstat-no" title="statement not covered" >r.wasBlocked)</span>.reduce(<span class="fstat-no" title="function not covered" >(s</span>um, r) =&gt; <span class="cstat-no" title="statement not covered" >sum + r.estimatedCost,</span> 0),
   };
 }
 &nbsp;
@@ -489,9 +480,9 @@ function <span class="fstat-no" title="function not covered" >ensureStorage(</sp
 <span class="cstat-no" title="statement not covered" >export function <span class="fstat-no" title="function not covered" >g</span>etBlockedRequests(</span>limit: number = <span class="branch-0 cbranch-no" title="branch not covered" >10)</span>: CLIRequestRecord[] {
   const windowMs = <span class="cstat-no" title="statement not covered" >24 * 3600000;</span> // 24 hours
   const now = <span class="cstat-no" title="statement not covered" >Date.now();</span>
-  
+&nbsp;
 <span class="cstat-no" title="statement not covered" >  return loadRequestHistory()</span>
-    .filter(<span class="fstat-no" title="function not covered" >r </span>=&gt; <span class="cstat-no" title="statement not covered" >r.wasBlocked &amp;&amp; (now - r.timestamp) &lt; windowMs)</span>
+    .filter(<span class="fstat-no" title="function not covered" >(r</span>) =&gt; <span class="cstat-no" title="statement not covered" >r.wasBlocked &amp;&amp; now - r.timestamp &lt; windowMs)</span>
     .sort(<span class="fstat-no" title="function not covered" >(a</span>, b) =&gt; <span class="cstat-no" title="statement not covered" >b.timestamp - a.timestamp)</span>
     .slice(0, limit);
 }
@@ -511,7 +502,7 @@ function <span class="fstat-no" title="function not covered" >ensureStorage(</sp
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-04-25T10:55:11.726Z
+                at 2026-05-01T11:07:11.036Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

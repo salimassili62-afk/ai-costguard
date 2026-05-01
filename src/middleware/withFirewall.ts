@@ -1,19 +1,5 @@
 /**
- * AI Execution Firewall - Middleware Layer
- *
- * Provides automatic request interception for OpenAI, fetch, and axios.
- * Uses DEEP RECURSIVE PROXY to intercept ALL nested SDK calls.
- *
- * Usage:
- *   const openai = withFirewall(new OpenAI({ apiKey: '...' }));
- *   const response = await openai.chat.completions.create({...});
- *   const response = await openai.responses.create({...});  // Also intercepted!
- *
- *   // Or wrap fetch:
- *   const safeFetch = withFirewall(fetch);
- *
- *   // Or wrap axios:
- *   const safeAxios = withFirewall(axios);
+ * AI Execution Firewall - SDK and fetch middleware.
  */
 
 import { detectionEngine } from '../core/DetectionEngine';
@@ -21,8 +7,9 @@ import { estimateMessagesTokens } from '../token-counter';
 import { estimateCost } from '../config';
 import { ConfigManager } from '../config';
 import { logger } from '../logger';
+import { costLedger } from '../core/CostLedger';
+import { FirewallMetadata, TokenBreakdown } from '../core/types';
 
-// Types for OpenAI-compatible clients
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -35,21 +22,25 @@ interface OpenAIRequest {
   max_tokens?: number;
   temperature?: number;
   input?: string | ChatMessage[];
+  metadata?: FirewallMetadata;
 }
 
 interface FirewallOptions {
   trustMode?: 'monitor' | 'warn' | 'block';
   overrideBlock?: boolean;
+  metadata?: FirewallMetadata | ((request: OpenAIRequest) => FirewallMetadata);
   onBlock?: (reason: string, dangerScore: number, estimatedCost: number) => void;
   onWarn?: (reason: string, dangerScore: number, estimatedCost: number) => void;
   onSpike?: (requests: number, timeWindow: number) => void;
   debug?: boolean;
 }
 
-/**
- * Extract prompt text from request arguments
- */
-function extractPrompt(args: any[]): { model: string; prompt: string; maxTokens: number } {
+function extractPrompt(args: any[]): {
+  model: string;
+  prompt: string;
+  maxTokens: number;
+  request?: OpenAIRequest;
+} {
   const request = args[0] as OpenAIRequest | undefined;
 
   if (!request) {
@@ -70,15 +61,11 @@ function extractPrompt(args: any[]): { model: string; prompt: string; maxTokens:
     prompt = JSON.stringify(request);
   }
 
-  return { model, prompt, maxTokens };
+  return { model, prompt, maxTokens, request };
 }
 
-/**
- * Check if this is an AI API call that should be analyzed
- */
 function isAICall(path: string[]): boolean {
   const pathStr = path.join('.');
-  // Intercept common OpenAI SDK methods
   const aiPatterns = [
     'chat.completions.create',
     'completions.create',
@@ -91,18 +78,31 @@ function isAICall(path: string[]): boolean {
     'beta.chat.completions.create',
     'beta.assistants.create',
     'beta.threads.messages.create',
+    'models.generateContent',
+    'generateContent',
   ];
-  return aiPatterns.some(pattern => pathStr.includes(pattern));
+  return aiPatterns.some((pattern) => pathStr.includes(pattern));
 }
 
-/**
- * Deep recursive proxy that wraps all nested objects and intercepts method calls
- */
-function wrap<T extends object>(
-  target: T,
-  path: string[] = [],
-  options: FirewallOptions
-): T {
+function resolveMetadata(request: OpenAIRequest | undefined, options: FirewallOptions): FirewallMetadata | undefined {
+  const optionMetadata =
+    typeof options.metadata === 'function' ? options.metadata(request || { model: 'unknown' }) : options.metadata;
+
+  return {
+    ...(optionMetadata || {}),
+    ...(request?.metadata || {}),
+  };
+}
+
+function toTokenBreakdown(inputTokens: number, outputTokens: number): TokenBreakdown {
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
+}
+
+function wrap<T extends object>(target: T, path: string[] = [], options: FirewallOptions): T {
   const config = new ConfigManager();
   const trustMode = options.trustMode || config.trustMode;
 
@@ -111,47 +111,45 @@ function wrap<T extends object>(
       const value = obj[prop as keyof typeof obj];
       const newPath = [...path, String(prop)];
 
-      // If it's a function, wrap it to intercept calls
       if (typeof value === 'function') {
         return async function (this: any, ...args: any[]) {
-          // Debug log
           if (options.debug) {
             console.log('INTERCEPTED CALL:', newPath.join('.'));
           }
 
-          // Check if this is an AI API call
           if (isAICall(newPath)) {
-            const { model, prompt, maxTokens } = extractPrompt(args);
-
-            // Estimate tokens and cost
+            const { model, prompt, maxTokens, request } = extractPrompt(args);
             const messages = args[0]?.messages;
-            const inputTokens = messages
-              ? estimateMessagesTokens(messages, model)
-              : 0;
+            const inputTokens = messages ? estimateMessagesTokens(messages, model) : 0;
             const estimatedCost = estimateCost(model, inputTokens, maxTokens);
+            const tokens = toTokenBreakdown(inputTokens, maxTokens);
 
-            // Analyze with DetectionEngine (single source of truth)
-            // Pass alert hooks for real-time notifications
             const result = detectionEngine.analyze({
               model,
               prompt,
               estimatedCost,
               trustMode,
               override: options.overrideBlock || false,
+              metadata: resolveMetadata(request, options),
+              tokens,
               onBlock: options.onBlock,
               onWarn: options.onWarn,
               onSpike: options.onSpike,
             });
 
-            // Handle blocked request
+            const ledgerId = costLedger.recordEstimate({
+              prompt,
+              model,
+              estimatedCost,
+              estimatedTokens: inputTokens + maxTokens,
+              inputTokens,
+              outputTokens: maxTokens,
+              saved: result.saved,
+              wouldHaveLost: result.wouldHaveLost,
+            });
+
             if (result.decision === 'block' && !options.overrideBlock) {
-              logger.warn(`🔴 BLOCKED by Firewall: ${result.reason} (score: ${result.dangerScore})`);
-
-              if (options.onBlock) {
-                options.onBlock(result.reason, result.dangerScore, estimatedCost);
-              }
-
-              // Return a rejected promise that mimics OpenAI error format
+              logger.warn(`BLOCKED by Firewall: ${result.reason} (score: ${result.dangerScore})`);
               return Promise.reject({
                 error: {
                   message: `Request blocked by AI Execution Firewall: ${result.reason}`,
@@ -163,51 +161,39 @@ function wrap<T extends object>(
               });
             }
 
-            // Handle warning
             if (result.decision === 'warn') {
-              logger.warn(`⚠️  Warning: ${result.reason} (score: ${result.dangerScore})`);
-
-              if (options.onWarn) {
-                options.onWarn(result.reason, result.dangerScore, estimatedCost);
-              }
+              logger.warn(`Warning: ${result.reason} (score: ${result.dangerScore})`);
             }
+
+            const response = await value.apply(obj, args);
+            costLedger.recordActualFromResponse(ledgerId, response, model);
+            return response;
           }
 
-          // Call the original function
           return value.apply(obj, args);
         };
       }
 
-      // If it's an object (and not null), recursively wrap it
       if (typeof value === 'object' && value !== null) {
         return wrap(value, newPath, options);
       }
 
-      // Return primitive values as-is
       return value;
     },
   });
 }
 
-/**
- * Wrap an OpenAI SDK client with firewall protection using deep recursive proxy
- */
-export function withFirewall<T extends object>(
-  client: T,
-  options: FirewallOptions = {}
-): T {
+export function withFirewall<T extends object>(client: T, options: FirewallOptions = {}): T {
   return wrap(client, [], options);
 }
 
-/**
- * Wrap a generic async function with firewall protection
- */
 export function wrapFunction<T extends (...args: any[]) => Promise<any>>(
   fn: T,
   requestExtractor: (...args: Parameters<T>) => {
     model: string;
     prompt: string;
     estimatedCost?: number;
+    metadata?: FirewallMetadata;
   },
   options: FirewallOptions = {}
 ): T {
@@ -215,41 +201,93 @@ export function wrapFunction<T extends (...args: any[]) => Promise<any>>(
   const trustMode = options.trustMode || config.trustMode;
 
   return (async (...args: Parameters<T>): Promise<ReturnType<T>> => {
-    // Extract request data
     const requestData = requestExtractor(...args);
+    const estimatedCost = requestData.estimatedCost || 0;
 
-    // Analyze with DetectionEngine
     const result = detectionEngine.analyze({
       model: requestData.model,
       prompt: requestData.prompt,
-      estimatedCost: requestData.estimatedCost || 0,
+      estimatedCost,
       trustMode,
       override: options.overrideBlock || false,
+      metadata: {
+        ...(typeof options.metadata === 'function'
+          ? options.metadata({ model: requestData.model, prompt: requestData.prompt })
+          : options.metadata || {}),
+        ...(requestData.metadata || {}),
+      },
+      onBlock: options.onBlock,
+      onWarn: options.onWarn,
+      onSpike: options.onSpike,
     });
 
-    // Handle blocked request
     if (result.decision === 'block' && !options.overrideBlock) {
-      logger.warn(`🔴 BLOCKED: ${result.reason} (score: ${result.dangerScore})`);
-
-      if (options.onBlock) {
-        options.onBlock(result.reason, result.dangerScore, requestData.estimatedCost || 0);
-      }
-
+      logger.warn(`BLOCKED: ${result.reason} (score: ${result.dangerScore})`);
       throw new Error(`Request blocked by AI Execution Firewall: ${result.reason}`);
     }
 
-    // Handle warning
     if (result.decision === 'warn') {
-      logger.warn(`⚠️  Warning: ${result.reason} (score: ${result.dangerScore})`);
-
-      if (options.onWarn) {
-        options.onWarn(result.reason, result.dangerScore, requestData.estimatedCost || 0);
-      }
+      logger.warn(`Warning: ${result.reason} (score: ${result.dangerScore})`);
     }
 
-    // Execute original function
     return fn(...args);
   }) as T;
+}
+
+export type FetchLike = (input: any, init?: any) => Promise<any>;
+
+export function withFetchFirewall(fetchImpl: FetchLike, options: FirewallOptions = {}): FetchLike {
+  const config = new ConfigManager();
+  const trustMode = options.trustMode || config.trustMode;
+
+  return async (input: any, init: any = {}) => {
+    const url = typeof input === 'string' ? input : String(input?.url || '');
+    const body = typeof init?.body === 'string' ? safeJsonParse(init.body) : init?.body;
+    const pathLooksAi = [
+      '/v1/chat/completions',
+      '/v1/responses',
+      '/v1/messages',
+      '/generateContent',
+      '/chat/completions',
+    ].some((pattern) => url.includes(pattern));
+
+    if (!pathLooksAi || !body) {
+      return fetchImpl(input, init);
+    }
+
+    const request = body as OpenAIRequest;
+    const model = request.model || 'unknown';
+    const prompt = request.messages ? JSON.stringify(request.messages) : request.prompt || JSON.stringify(request);
+    const inputTokens = request.messages ? estimateMessagesTokens(request.messages, model) : 0;
+    const outputTokens = request.max_tokens || 1000;
+    const estimatedCost = estimateCost(model, inputTokens, outputTokens);
+    const result = detectionEngine.analyze({
+      model,
+      prompt,
+      estimatedCost,
+      trustMode,
+      override: options.overrideBlock || false,
+      metadata: resolveMetadata(request, options),
+      tokens: toTokenBreakdown(inputTokens, outputTokens),
+      onBlock: options.onBlock,
+      onWarn: options.onWarn,
+      onSpike: options.onSpike,
+    });
+
+    if (result.decision === 'block' && !options.overrideBlock) {
+      throw new Error(`Request blocked by AI Execution Firewall: ${result.reason}`);
+    }
+
+    return fetchImpl(input, init);
+  };
+}
+
+function safeJsonParse(value: string): any {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
 }
 
 export { FirewallOptions, OpenAIRequest, ChatMessage };

@@ -1,9 +1,9 @@
 /**
  * SDK Interface - AI Execution Firewall
- * 
+ *
  * This file contains ONLY interface logic.
  * ALL detection happens in DetectionEngine (single source of truth).
- * 
+ *
  * Flow:
  *   User Input → SDK → DetectionEngine.analyze() → Result
  */
@@ -50,18 +50,13 @@ export class AIExecutionFirewall {
     this.config = new ConfigManager();
   }
 
-  async call<T = unknown>(
-    apiCall: () => Promise<T>,
-    options: AIRequestOptions
-  ): Promise<AIResponse & { data?: T }> {
+  async call<T = unknown>(apiCall: () => Promise<T>, options: AIRequestOptions): Promise<AIResponse & { data?: T }> {
     const { model, prompt, messages, context, overrideBlock } = options;
-    
+
     const textToAnalyze = prompt || JSON.stringify(messages || '');
-    
-    const inputTokens = messages 
-      ? estimateMessagesTokens(messages, model)
-      : estimateTokens(prompt || '', model);
-    
+
+    const inputTokens = messages ? estimateMessagesTokens(messages, model) : estimateTokens(prompt || '', model);
+
     const pricing = getModelPricing(model);
     if (!pricing) {
       logger.warn(`⚠️  Unknown model: ${model}, allowing request`);
@@ -78,16 +73,16 @@ export class AIExecutionFirewall {
       estimatedCost,
       context,
       trustMode: this.config.trustMode,
-      override: overrideBlock
+      override: overrideBlock,
     });
-    
+
     // Handle blocked request
     if (detectionResult.decision === 'block' && !overrideBlock) {
       const savedAmount = estimatedCost;
       // Map category to alert-compatible type (filter out 'safe'/'invalid')
-      const alertCategory: 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'anomaly' = 
-        detectionResult.category === 'safe' || detectionResult.category === 'invalid' 
-          ? 'anomaly' 
+      const alertCategory: 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'budget' | 'anomaly' =
+        detectionResult.category === 'safe' || detectionResult.category === 'invalid'
+          ? 'anomaly'
           : detectionResult.category;
       const alert = formatAlert({
         severity: detectionResult.dangerScore >= 90 ? 'CRITICAL' : 'HIGH',
@@ -98,7 +93,16 @@ export class AIExecutionFirewall {
       });
       if (alert) logger.info(alert);
 
-      this.logRequest(model, inputTokens, 0, estimatedCost, true, detectionResult.dangerScore, detectionResult.reason, textToAnalyze);
+      this.logRequest(
+        model,
+        inputTokens,
+        0,
+        estimatedCost,
+        true,
+        detectionResult.dangerScore,
+        detectionResult.reason,
+        textToAnalyze
+      );
       return {
         success: false,
         blocked: true,
@@ -123,7 +127,7 @@ export class AIExecutionFirewall {
         action: 'allow',
         killSwitchTriggered: false,
       });
-      
+
       return {
         success: true,
         blocked: false,
@@ -205,7 +209,9 @@ export class AIExecutionFirewall {
     return this.logger.getStats(hours);
   }
 
-  updateConfig(updates: Partial<{ trustMode: 'monitor' | 'warn' | 'block'; maxCostPerRequest: number; dangerThreshold: number }>) {
+  updateConfig(
+    updates: Partial<{ trustMode: 'monitor' | 'warn' | 'block'; maxCostPerRequest: number; dangerThreshold: number }>
+  ) {
     this.config.updateConfig(updates);
   }
 }

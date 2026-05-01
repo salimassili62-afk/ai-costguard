@@ -1,13 +1,13 @@
 /**
  * CostTruthEngine.ts - Financial Truth System
- * 
+ *
  * Measures, prevents, and proves financial loss in real-time.
  * Tracks every request to calculate "saved" vs "would have lost" metrics.
- * 
+ *
  * Core Principle: Every request answers:
  * {
  *   "cost": 0.12,
- *   "risk": "HIGH", 
+ *   "risk": "HIGH",
  *   "decision": "BLOCK",
  *   "saved": 38.21,
  *   "wouldHaveLost": 120.50
@@ -98,7 +98,7 @@ export class CostTruthEngine {
     return {
       cost: Math.round(cost * 10000) / 10000, // Round to 4 decimals
       tokens: totalTokens,
-      model: params.model
+      model: params.model,
     };
   }
 
@@ -110,14 +110,14 @@ export class CostTruthEngine {
    */
   compareCost(hours: number = 24): CostComparison {
     const stats = stateStore.getStats(hours);
-    
+
     // Calculate saved: sum of costs for all blocked requests
     const blockedRequests = stateStore.getBlocked(1000);
     const saved = blockedRequests.reduce((sum, req) => sum + req.estimatedCost, 0);
-    
+
     // Calculate actual spend: sum of costs for allowed requests
     const actualSpend = stats.totalCost;
-    
+
     // Would have lost = saved + actual (what we would have spent without firewall)
     const wouldHaveLost = saved + actualSpend;
 
@@ -126,7 +126,7 @@ export class CostTruthEngine {
       wouldHaveLost: Math.round(wouldHaveLost * 100) / 100,
       actualSpend: Math.round(actualSpend * 100) / 100,
       blockedCount: stats.blockedRequests,
-      allowedCount: stats.totalRequests - stats.blockedRequests
+      allowedCount: stats.totalRequests - stats.blockedRequests,
     };
   }
 
@@ -136,10 +136,10 @@ export class CostTruthEngine {
   trackEvent(event: Omit<TrackedEvent, 'timestamp'>): void {
     const fullEvent: TrackedEvent = {
       ...event,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
     this.events.push(fullEvent);
-    
+
     // Keep only last 10000 events to prevent memory bloat
     if (this.events.length > 10000) {
       this.events = this.events.slice(-10000);
@@ -150,8 +150,8 @@ export class CostTruthEngine {
    * Get events for a time window
    */
   getEvents(minutes: number = 60): TrackedEvent[] {
-    const cutoff = Date.now() - (minutes * 60 * 1000);
-    return this.events.filter(e => e.timestamp >= cutoff);
+    const cutoff = Date.now() - minutes * 60 * 1000;
+    return this.events.filter((e) => e.timestamp >= cutoff);
   }
 
   /**
@@ -164,14 +164,12 @@ export class CostTruthEngine {
   } {
     const comparison = this.compareCost(24 * 30); // 30 days
     const totalRequests = comparison.blockedCount + comparison.allowedCount;
-    const protectionRate = totalRequests > 0 
-      ? (comparison.blockedCount / totalRequests) * 100 
-      : 0;
+    const protectionRate = totalRequests > 0 ? (comparison.blockedCount / totalRequests) * 100 : 0;
 
     return {
       totalSaved: comparison.saved,
       totalWouldHaveLost: comparison.wouldHaveLost,
-      protectionRate: Math.round(protectionRate * 100) / 100
+      protectionRate: Math.round(protectionRate * 100) / 100,
     };
   }
 
@@ -185,22 +183,20 @@ export class CostTruthEngine {
     wouldHaveLost?: number;
   }): CostTruthResult {
     const comparison = this.compareCost();
-    
+
     // If blocked, add this cost to saved
-    const saved = params.decision === 'BLOCK' 
-      ? params.cost 
-      : 0;
-    
+    const saved = params.decision === 'BLOCK' ? params.cost : 0;
+
     // Would have lost includes this request if it were allowed
-    const wouldHaveLost = params.wouldHaveLost ?? 
-      (comparison.wouldHaveLost + (params.decision === 'BLOCK' ? params.cost : 0));
+    const wouldHaveLost =
+      params.wouldHaveLost ?? comparison.wouldHaveLost + (params.decision === 'BLOCK' ? params.cost : 0);
 
     return {
       cost: params.cost,
       risk: params.risk,
       decision: params.decision,
       saved: Math.round(saved * 100) / 100,
-      wouldHaveLost: Math.round(wouldHaveLost * 100) / 100
+      wouldHaveLost: Math.round(wouldHaveLost * 100) / 100,
     };
   }
 
@@ -218,11 +214,11 @@ export class CostTruthEngine {
       'claude-3-opus': { inputPer1K: 0.015, outputPer1K: 0.075 },
       'claude-3-sonnet': { inputPer1K: 0.003, outputPer1K: 0.015 },
       'claude-3-haiku': { inputPer1K: 0.00025, outputPer1K: 0.00125 },
-      'default': { inputPer1K: 0.01, outputPer1K: 0.03 }
+      default: { inputPer1K: 0.01, outputPer1K: 0.03 },
     };
 
     // Find matching model or use default
-    const key = Object.keys(pricing).find(k => model.toLowerCase().includes(k.toLowerCase()));
+    const key = Object.keys(pricing).find((k) => model.toLowerCase().includes(k.toLowerCase()));
     return key ? pricing[key] : pricing['default'];
   }
 

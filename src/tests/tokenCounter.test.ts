@@ -26,7 +26,7 @@ describe('TokenCounter', () => {
     const text = 'Test text for model comparison';
     const gpt4Result = estimateTokens(text, 'gpt-4');
     const gpt35Result = estimateTokens(text, 'gpt-3.5-turbo');
-    
+
     // Different models should use different ratios
     expect(gpt4Result).toBeGreaterThan(0);
     expect(gpt35Result).toBeGreaterThan(0);
@@ -37,7 +37,7 @@ describe('TokenCounter', () => {
       { role: 'user', content: 'Hello' },
       { role: 'assistant', content: 'Hi there!' },
     ];
-    
+
     const result = estimateMessagesTokens(messages);
     expect(result).toBeGreaterThan(0);
   });
@@ -49,28 +49,26 @@ describe('TokenCounter', () => {
   });
 
   test('should add model-specific overhead', () => {
-    const messages = [
-      { role: 'user', content: 'Test' },
-    ];
-    
+    const messages = [{ role: 'user', content: 'Test' }];
+
     const gpt4Result = estimateMessagesTokens(messages, 'gpt-4');
     const gpt35Result = estimateMessagesTokens(messages, 'gpt-3.5-turbo');
-    
+
     // GPT-4 should have more overhead
     expect(gpt4Result).toBeGreaterThan(gpt35Result);
   });
 
   test('should handle array content in messages', () => {
     const messages = [
-      { 
-        role: 'user', 
+      {
+        role: 'user',
         content: [
           { type: 'text', text: 'Hello' },
-          { type: 'text', text: 'World' }
-        ]
+          { type: 'text', text: 'World' },
+        ],
       },
     ];
-    
+
     const result = estimateMessagesTokens(messages);
     expect(result).toBeGreaterThan(0);
   });

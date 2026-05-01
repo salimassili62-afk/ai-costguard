@@ -1,6 +1,6 @@
 /**
  * PricingConfig.ts - Real API Pricing Configuration
- * 
+ *
  * Maps token counts to actual costs for supported models
  * Used for real cost extraction from API responses
  */
@@ -8,7 +8,9 @@
 export interface ModelPricing {
   inputPer1K: number;
   outputPer1K: number;
-  provider: 'openai' | 'anthropic' | 'google' | 'cohere';
+  provider: 'openai' | 'anthropic' | 'google' | 'cohere' | 'openrouter' | 'custom';
+  cachedInputPer1K?: number;
+  reasoningOutputPer1K?: number;
 }
 
 export interface TokenUsage {
@@ -44,7 +46,7 @@ export class PricingConfig {
       'gpt-4o-mini': { inputPer1K: 0.00015, outputPer1K: 0.0006, provider: 'openai' },
       'gpt-3.5-turbo': { inputPer1K: 0.0005, outputPer1K: 0.0015, provider: 'openai' },
       'gpt-3.5-turbo-16k': { inputPer1K: 0.001, outputPer1K: 0.002, provider: 'openai' },
-      
+
       // Anthropic Models
       'claude-3-opus': { inputPer1K: 0.015, outputPer1K: 0.075, provider: 'anthropic' },
       'claude-3-opus-20240229': { inputPer1K: 0.015, outputPer1K: 0.075, provider: 'anthropic' },
@@ -55,17 +57,17 @@ export class PricingConfig {
       'claude-2.1': { inputPer1K: 0.008, outputPer1K: 0.024, provider: 'anthropic' },
       'claude-2': { inputPer1K: 0.008, outputPer1K: 0.024, provider: 'anthropic' },
       'claude-instant-1.2': { inputPer1K: 0.0008, outputPer1K: 0.0024, provider: 'anthropic' },
-      
+
       // Google Models
       'gemini-pro': { inputPer1K: 0.0005, outputPer1K: 0.0015, provider: 'google' },
       'gemini-pro-vision': { inputPer1K: 0.00025, outputPer1K: 0.0005, provider: 'google' },
-      
+
       // Cohere Models
-      'command': { inputPer1K: 0.0015, outputPer1K: 0.002, provider: 'cohere' },
+      command: { inputPer1K: 0.0015, outputPer1K: 0.002, provider: 'cohere' },
       'command-light': { inputPer1K: 0.0003, outputPer1K: 0.0006, provider: 'cohere' },
-      
+
       // Default fallback
-      'default': { inputPer1K: 0.01, outputPer1K: 0.03, provider: 'openai' },
+      default: { inputPer1K: 0.01, outputPer1K: 0.03, provider: 'openai' },
     };
   }
 
@@ -87,8 +89,8 @@ export class PricingConfig {
 
     // Try partial match (e.g., "gpt-4" matches "gpt-4-turbo")
     const modelLower = model.toLowerCase();
-    const match = Object.keys(this.pricing).find(key => 
-      modelLower.includes(key.toLowerCase()) || key.toLowerCase().includes(modelLower)
+    const match = Object.keys(this.pricing).find(
+      (key) => modelLower.includes(key.toLowerCase()) || key.toLowerCase().includes(modelLower)
     );
 
     return match ? this.pricing[match] : this.pricing['default'];
@@ -99,7 +101,7 @@ export class PricingConfig {
    */
   calculateCost(model: string, usage: TokenUsage): CostCalculation {
     const pricing = this.getPricing(model);
-    
+
     const inputCost = (usage.prompt_tokens / 1000) * pricing.inputPer1K;
     const outputCost = (usage.completion_tokens / 1000) * pricing.outputPer1K;
     const totalCost = inputCost + outputCost;
@@ -162,7 +164,7 @@ export class PricingConfig {
    * Get all supported models
    */
   getSupportedModels(): string[] {
-    return Object.keys(this.pricing).filter(m => m !== 'default');
+    return Object.keys(this.pricing).filter((m) => m !== 'default');
   }
 }
 

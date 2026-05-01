@@ -39,6 +39,8 @@ describe('ProxyServer - Strict Behavioral Tests', () => {
           warnedRequests: 0,
           totalCost: 0,
           preventedCost: 0,
+          actualCost: 0,
+          totalTokens: 0,
         },
       });
     });
@@ -188,13 +190,13 @@ describe('ProxyServer - Strict Behavioral Tests', () => {
       }
 
       const responses = await Promise.all(requests);
-      const rateLimited = responses.some(r => r.status === 429);
-      
+      const rateLimited = responses.some((r) => r.status === 429);
+
       // At least some should be rate limited
       expect(rateLimited).toBe(true);
 
       // Check 429 response format
-      const limited = responses.find(r => r.status === 429);
+      const limited = responses.find((r) => r.status === 429);
       if (limited) {
         expect(limited.data.error).toBe('Too many requests');
         expect(limited.data.retryAfter).toBe(60);

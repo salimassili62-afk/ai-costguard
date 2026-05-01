@@ -37,7 +37,7 @@ export class Logger {
   constructor(customLogPath?: string) {
     const homeDir = os.homedir();
     this.logDir = path.join(homeDir, '.aifw');
-    
+
     if (!fs.existsSync(this.logDir)) {
       fs.mkdirSync(this.logDir, { recursive: true });
     }
@@ -51,7 +51,7 @@ export class Logger {
       entry.traceId = this.generateTraceId();
     }
     const logLine = JSON.stringify(entry) + '\n';
-    
+
     try {
       fs.appendFileSync(this.logFilePath, logLine, 'utf-8');
     } catch (error) {
@@ -64,21 +64,14 @@ export class Logger {
   }
 
   getStats(hours: number = 24): Stats {
-    const since = Date.now() - (hours * 60 * 60 * 1000);
-    const recentLogs = this.loadLogs().filter(log => log.timestamp > since);
-    
+    const since = Date.now() - hours * 60 * 60 * 1000;
+    const recentLogs = this.loadLogs().filter((log) => log.timestamp > since);
+
     const totalRequests = recentLogs.length;
-    const blockedRequests = recentLogs.filter(log => log.wasBlocked).length;
-    const totalCost = recentLogs
-      .filter(log => !log.wasBlocked)
-      .reduce((sum, log) => sum + log.estimatedCost, 0);
-    const preventedCost = recentLogs
-      .filter(log => log.wasBlocked)
-      .reduce((sum, log) => sum + log.estimatedCost, 0);
-    const totalTokens = recentLogs.reduce(
-      (sum, log) => sum + log.inputTokens + log.outputTokens,
-      0
-    );
+    const blockedRequests = recentLogs.filter((log) => log.wasBlocked).length;
+    const totalCost = recentLogs.filter((log) => !log.wasBlocked).reduce((sum, log) => sum + log.estimatedCost, 0);
+    const preventedCost = recentLogs.filter((log) => log.wasBlocked).reduce((sum, log) => sum + log.estimatedCost, 0);
+    const totalTokens = recentLogs.reduce((sum, log) => sum + log.inputTokens + log.outputTokens, 0);
 
     return {
       totalRequests,
@@ -97,7 +90,7 @@ export class Logger {
   getBlockedRequests(limit: number = 20): LogEntry[] {
     const logs = this.loadLogs();
     return logs
-      .filter(log => log.wasBlocked)
+      .filter((log) => log.wasBlocked)
       .slice(-limit)
       .reverse();
   }
@@ -107,13 +100,11 @@ export class Logger {
       if (!fs.existsSync(this.logFilePath)) {
         return [];
       }
-      
+
       const data = fs.readFileSync(this.logFilePath, 'utf-8');
       const lines = data.trim().split('\n');
-      
-      return lines
-        .filter(line => line.trim())
-        .map(line => JSON.parse(line));
+
+      return lines.filter((line) => line.trim()).map((line) => JSON.parse(line));
     } catch (error) {
       console.error('Failed to load logs:', error);
       return [];
@@ -121,11 +112,11 @@ export class Logger {
   }
 
   clearOldLogs(days: number = 30): void {
-    const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
-    const logs = this.loadLogs().filter(log => log.timestamp > cutoff);
-    
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const logs = this.loadLogs().filter((log) => log.timestamp > cutoff);
+
     try {
-      fs.writeFileSync(this.logFilePath, logs.map(log => JSON.stringify(log)).join('\n') + '\n', 'utf-8');
+      fs.writeFileSync(this.logFilePath, logs.map((log) => JSON.stringify(log)).join('\n') + '\n', 'utf-8');
     } catch (error) {
       console.error('Failed to clear old logs:', error);
     }

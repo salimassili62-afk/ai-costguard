@@ -1,11 +1,11 @@
 /**
  * CostLedger.ts - Financial Ledger Engine
- * 
+ *
  * Tracks estimated vs actual costs:
  * - Estimated cost BEFORE execution
  * - Actual cost AFTER execution (from real API responses)
  * - Difference calculation: saved = wouldHaveSpent - actualSpent
- * 
+ *
  * Output format:
  * {
  *   cost: 0.12,
@@ -89,7 +89,7 @@ export class CostLedger {
     wouldHaveLost: number;
   }): string {
     const id = this.generateId();
-    
+
     const entry: CostLedgerEntry = {
       id,
       timestamp: Date.now(),
@@ -117,12 +117,12 @@ export class CostLedger {
    * Extracts real token usage and calculates actual cost
    */
   recordActualFromResponse(id: string, apiResponse: any, model: string): boolean {
-    const entry = this.entries.find(e => e.id === id);
+    const entry = this.entries.find((e) => e.id === id);
     if (!entry) return false;
 
     // Extract token usage from API response
     const usage = pricingConfig.extractUsage(apiResponse);
-    
+
     if (!usage) {
       // Fallback: if no usage data, keep estimated as actual
       entry.actual = {
@@ -137,7 +137,7 @@ export class CostLedger {
     } else {
       // Calculate real cost from actual token usage
       const costCalc = pricingConfig.calculateCost(model, usage);
-      
+
       entry.actual = {
         cost: costCalc.totalCost,
         tokens: usage.total_tokens,
@@ -164,7 +164,7 @@ export class CostLedger {
    * Update with actual cost (after execution) - legacy method
    */
   recordActual(id: string, actualCost: CostActual): boolean {
-    const entry = this.entries.find(e => e.id === id);
+    const entry = this.entries.find((e) => e.id === id);
     if (!entry) return false;
 
     entry.actual = actualCost;
@@ -182,8 +182,8 @@ export class CostLedger {
    * Get cost summary for a time period
    */
   getSummary(hours: number = 24): CostSummary {
-    const cutoff = Date.now() - (hours * 60 * 60 * 1000);
-    const entries = this.entries.filter(e => e.timestamp >= cutoff);
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
+    const entries = this.entries.filter((e) => e.timestamp >= cutoff);
 
     let totalEstimated = 0;
     let totalActual = 0;
@@ -205,11 +205,9 @@ export class CostLedger {
     }
 
     const averageVariance = actualCount > 0 ? varianceSum / actualCount : 0;
-    
+
     // Accuracy: 100% = perfect estimates, 0% = completely wrong
-    const accuracy = totalActual > 0
-      ? Math.max(0, 100 - (averageVariance / totalActual * 100))
-      : 100;
+    const accuracy = totalActual > 0 ? Math.max(0, 100 - (averageVariance / totalActual) * 100) : 100;
 
     return {
       totalEstimated: Math.round(totalEstimated * 10000) / 10000,
@@ -225,12 +223,7 @@ export class CostLedger {
   /**
    * Create ledger output format
    */
-  createLedgerOutput(params: {
-    estimatedCost: number;
-    actualCost?: number;
-    saved: number;
-    wouldHaveLost: number;
-  }): {
+  createLedgerOutput(params: { estimatedCost: number; actualCost?: number; saved: number; wouldHaveLost: number }): {
     cost: number;
     wouldHaveLost: number;
     saved: number;
@@ -254,7 +247,7 @@ export class CostLedger {
    */
   getCompletedEntries(limit: number = 100): CostLedgerEntry[] {
     return this.entries
-      .filter(e => e.actual !== undefined)
+      .filter((e) => e.actual !== undefined)
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, limit);
   }
@@ -271,10 +264,8 @@ export class CostLedger {
     protectionRate: number;
   } {
     const summary = this.getSummary(hours);
-    
-    const protectionRate = summary.totalWouldHaveLost > 0
-      ? (summary.totalSaved / summary.totalWouldHaveLost) * 100
-      : 0;
+
+    const protectionRate = summary.totalWouldHaveLost > 0 ? (summary.totalSaved / summary.totalWouldHaveLost) * 100 : 0;
 
     return {
       period: `${hours}h`,

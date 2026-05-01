@@ -37,7 +37,7 @@ describe('ProxyServer Contract', () => {
     server = new ProxyServer(TEST_PORT);
     await server.start();
     expect(server.isListening()).toBe(true);
-    
+
     await server.stop();
     expect(server.isListening()).toBe(false);
   });

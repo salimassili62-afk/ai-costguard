@@ -1,12 +1,12 @@
 /**
  * SessionStats.ts - Session-level aggregation
- * 
+ *
  * Tracks per run / per 24h:
  * - total requests
  * - total blocked
  * - total saved
  * - total spent
- * 
+ *
  * Persists session stats locally
  */
 
@@ -79,12 +79,12 @@ export class SessionStatsManager {
       if (fs.existsSync(this.sessionFile)) {
         const data = fs.readFileSync(this.sessionFile, 'utf8');
         const session = JSON.parse(data);
-        
+
         // Start new session if it's been more than 24 hours
         if (Date.now() - session.startTime > 24 * 60 * 60 * 1000) {
           return this.createNewSession();
         }
-        
+
         return session;
       }
     } catch (e) {
@@ -194,7 +194,7 @@ export class SessionStatsManager {
     const dates = Object.keys(dailyStats).sort().reverse();
     if (dates.length > 30) {
       const toDelete = dates.slice(30);
-      toDelete.forEach(d => delete dailyStats[d]);
+      toDelete.forEach((d) => delete dailyStats[d]);
     }
 
     this.saveDailyStats(dailyStats);
@@ -233,7 +233,7 @@ export class SessionStatsManager {
   getDailyStats(days: number = 7): DailyStats[] {
     const dailyStats = this.loadDailyStats();
     const dates = Object.keys(dailyStats).sort().reverse().slice(0, days);
-    return dates.map(d => dailyStats[d]);
+    return dates.map((d) => dailyStats[d]);
   }
 
   /**
@@ -250,22 +250,20 @@ export class SessionStatsManager {
     protectionRate: number;
   } {
     const session = this.currentSession;
-    const cutoff = Date.now() - (hours * 60 * 60 * 1000);
-    
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
+
     // Filter requests within time window
-    const recentRequests = session.requests.filter(r => r.timestamp >= cutoff);
-    
+    const recentRequests = session.requests.filter((r) => r.timestamp >= cutoff);
+
     const totalRequests = recentRequests.length;
-    const totalBlocked = recentRequests.filter(r => r.decision === 'BLOCK').length;
-    const totalAllowed = recentRequests.filter(r => r.decision === 'ALLOW').length;
-    
+    const totalBlocked = recentRequests.filter((r) => r.decision === 'BLOCK').length;
+    const totalAllowed = recentRequests.filter((r) => r.decision === 'ALLOW').length;
+
     const totalSaved = recentRequests.reduce((sum, r) => sum + r.saved, 0);
     const totalSpent = recentRequests.reduce((sum, r) => sum + r.cost, 0);
     const totalWouldHaveLost = totalSaved + totalSpent;
-    
-    const protectionRate = totalRequests > 0
-      ? (totalBlocked / totalRequests) * 100
-      : 0;
+
+    const protectionRate = totalRequests > 0 ? (totalBlocked / totalRequests) * 100 : 0;
 
     return {
       period: `${hours}h`,

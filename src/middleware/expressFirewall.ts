@@ -25,10 +25,12 @@ import { estimateMessagesTokens } from '../token-counter';
 import { estimateCost } from '../config';
 import { ConfigManager } from '../config';
 import { logger } from '../logger';
+import { FirewallMetadata } from '../core/types';
 
 interface FirewallMiddlewareOptions {
   trustMode?: 'monitor' | 'warn' | 'block';
   paths?: string[]; // Paths to protect (default: ['/v1/chat/completions', '/v1/messages'])
+  metadata?: FirewallMetadata | ((req: Request) => FirewallMetadata);
   onBlock?: (req: Request, res: Response, reason: string, dangerScore: number) => void;
   onWarn?: (req: Request, reason: string, dangerScore: number) => void;
   onAllow?: (req: Request) => void;
@@ -57,15 +59,17 @@ const DEFAULT_PROTECTED_PATHS = [
   '/v1/completions',
   '/api/openai',
   '/api/anthropic',
+  '/api/chat',
+  '/api/gemini',
+  '/api/openrouter',
+  '/v1beta/models',
 ];
 
 /**
  * Check if a request path should be protected
  */
 function shouldProtectPath(path: string, protectedPaths: string[]): boolean {
-  return protectedPaths.some(protectedPath =>
-    path === protectedPath || path.startsWith(protectedPath + '/')
-  );
+  return protectedPaths.some((protectedPath) => path === protectedPath || path.startsWith(protectedPath + '/'));
 }
 
 /**
@@ -81,6 +85,22 @@ function extractPrompt(body: AIRequestBody): string {
   }
 
   return JSON.stringify(body);
+}
+
+function extractMetadata(req: Request, options: FirewallMiddlewareOptions): FirewallMetadata {
+  const optionMetadata = typeof options.metadata === 'function' ? options.metadata(req) : options.metadata;
+
+  return {
+    ...(optionMetadata || {}),
+    ...(req.body?.metadata || {}),
+    requestId: req.headers['x-request-id'] as string | undefined,
+    orgId: req.headers['x-tenant-id'] as string | undefined,
+    userId: req.headers['x-user-id'] as string | undefined,
+    sessionId: req.headers['x-session-id'] as string | undefined,
+    agentId: req.headers['x-agent-id'] as string | undefined,
+    workflowId: req.headers['x-workflow-id'] as string | undefined,
+    integration: 'express',
+  };
 }
 
 /**
@@ -110,9 +130,7 @@ export function expressFirewall(
     const prompt = extractPrompt(body);
 
     // Estimate tokens and cost
-    const inputTokens = body.messages
-      ? estimateMessagesTokens(body.messages, model)
-      : 0;
+    const inputTokens = body.messages ? estimateMessagesTokens(body.messages, model) : 0;
     const estimatedOutputTokens = body.max_tokens || 1000;
     const estimatedCost = estimateCost(model, inputTokens, estimatedOutputTokens);
 
@@ -123,6 +141,12 @@ export function expressFirewall(
       estimatedCost,
       trustMode,
       override: false,
+      metadata: extractMetadata(req, options),
+      tokens: {
+        inputTokens,
+        outputTokens: estimatedOutputTokens,
+        totalTokens: inputTokens + estimatedOutputTokens,
+      },
     });
 
     // Handle blocked request

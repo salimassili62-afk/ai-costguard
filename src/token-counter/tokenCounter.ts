@@ -5,7 +5,7 @@
 
 export interface ChatMessageContent {
   role?: string;
-  content: string | Array<{type: string; text?: string}>;
+  content: string | Array<{ type: string; text?: string }>;
 }
 
 /**
@@ -19,16 +19,16 @@ export function estimateTokens(text: string, model: string = 'gpt-3.5-turbo'): n
   // These are empirically derived from actual API behavior
   const ratios: Record<string, number> = {
     // OpenAI models - GPT-4 is more efficient
-    'gpt-4': 3.5,         // ~1 token per 3.5 chars
+    'gpt-4': 3.5, // ~1 token per 3.5 chars
     'gpt-4-turbo': 3.5,
     'gpt-4-turbo-preview': 3.5,
-    'gpt-4o': 3.2,        // Slightly more efficient
-    'gpt-4o-mini': 3.0,   // Most efficient
+    'gpt-4o': 3.2, // Slightly more efficient
+    'gpt-4o-mini': 3.0, // Most efficient
     'gpt-4-32k': 3.5,
     'gpt-3.5-turbo': 3.8,
     'gpt-3.5-turbo-16k': 3.8,
     'gpt-3.5-turbo-instruct': 3.8,
-    
+
     // Claude models - typically more token-heavy
     'claude-3-opus-20240229': 4.0,
     'claude-3-sonnet-20240229': 4.0,
@@ -59,9 +59,9 @@ export function estimateTokens(text: string, model: string = 'gpt-3.5-turbo'): n
 function getModelOverhead(model?: string): number {
   // Different models have different token overhead for message structure
   if (!model) return 10;
-  
+
   const lowerModel = model.toLowerCase();
-  
+
   if (lowerModel.includes('gpt-4')) {
     return 15; // GPT-4 has more complex message structure
   } else if (lowerModel.includes('gpt-3.5')) {
@@ -75,9 +75,9 @@ function getModelOverhead(model?: string): number {
 
 export function estimateMessagesTokens(messages: ChatMessageContent[], model?: string): number {
   if (!messages || !Array.isArray(messages)) return 0;
-  
+
   let totalTokens = 0;
-  
+
   for (const message of messages) {
     if (typeof message.content === 'string') {
       totalTokens += estimateTokens(message.content, model);
@@ -88,14 +88,14 @@ export function estimateMessagesTokens(messages: ChatMessageContent[], model?: s
         }
       }
     }
-    
+
     // Add overhead for role and structure (varies by model)
     const overhead = getModelOverhead(model);
     totalTokens += overhead;
   }
-  
+
   // Add base tokens for the messages array structure
   totalTokens += 3;
-  
+
   return Math.max(1, totalTokens);
 }

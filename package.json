@@ -1,7 +1,7 @@
 {
   "name": "ai-execution-firewall",
   "version": "1.0.7",
-  "description": "A firewall that blocks dangerous AI requests before they execute",
+  "description": "Pre-execution spend protection and cost kill switch for production AI agents",
   "main": "dist/index.js",
   "bin": {
     "aifw": "dist/cli/index.js",
@@ -12,6 +12,8 @@
   },
   "files": [
     "dist/**/*",
+    "!dist/tests/**/*",
+    "docs/**/*",
     "README.md",
     "LICENSE"
   ],
@@ -42,7 +44,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/salimassili62-afk/ai-waste-guard.git"
+    "url": "git+https://github.com/salimassili62-afk/ai-waste-guard.git"
   },
   "bugs": {
     "url": "https://github.com/salimassili62-afk/ai-waste-guard/issues"

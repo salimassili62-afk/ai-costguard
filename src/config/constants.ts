@@ -28,7 +28,7 @@ export const DETECTION_THRESHOLDS = {
   CONTEXT_EXPLOSION_MAX_SCORE: 75,
 
   // Fuzzy duplicate: 70%+ similarity
-  FUZZY_SIMILARITY: 0.70,
+  FUZZY_SIMILARITY: 0.7,
   FUZZY_DUPLICATE_BASE_SCORE: 30,
   FUZZY_DUPLICATE_MULTIPLIER: 40,
   FUZZY_DUPLICATE_MAX_SCORE: 70,
@@ -128,7 +128,7 @@ export const ALERT_CATEGORIES = {
   ANOMALY: 'anomaly',
 } as const;
 
-export type AlertCategory = typeof ALERT_CATEGORIES[keyof typeof ALERT_CATEGORIES];
+export type AlertCategory = (typeof ALERT_CATEGORIES)[keyof typeof ALERT_CATEGORIES];
 
 // Decisions
 export const DECISIONS = {
@@ -137,7 +137,7 @@ export const DECISIONS = {
   BLOCK: 'block',
 } as const;
 
-export type Decision = typeof DECISIONS[keyof typeof DECISIONS];
+export type Decision = (typeof DECISIONS)[keyof typeof DECISIONS];
 
 // Severity Levels
 export const SEVERITY = {
@@ -148,7 +148,7 @@ export const SEVERITY = {
   CRITICAL: 'CRITICAL',
 } as const;
 
-export type Severity = typeof SEVERITY[keyof typeof SEVERITY];
+export type Severity = (typeof SEVERITY)[keyof typeof SEVERITY];
 
 // File Paths - Unified storage directory
 export const PATHS = {

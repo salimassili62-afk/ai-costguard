@@ -103,7 +103,7 @@ describe('DetectionEngine - Strict Behavioral Tests', () => {
       expect(r3.dangerScore).toBe(93); // 90 + 3*1
       expect(r3.category).toBe('loop');
       expect(r3.metadata.loopCount).toBe(3);
-      expect(r3.reason).toBe('🔴 KILL SWITCH: RUNAWAY LOOP - 3 identical requests in 30 seconds');
+      expect(r3.reason).toBe('KILL SWITCH: RUNAWAY LOOP - 3 identical requests in 30 seconds');
     });
 
     test('should escalate danger score with more loop iterations', () => {
@@ -117,7 +117,7 @@ describe('DetectionEngine - Strict Behavioral Tests', () => {
       engine.analyze(input);
       engine.analyze(input);
       engine.analyze(input);
-      
+
       // 4th request - higher danger score
       const r4 = engine.analyze(input);
       expect(r4.dangerScore).toBe(96); // 90 + 3*2
@@ -191,14 +191,14 @@ describe('DetectionEngine - Strict Behavioral Tests', () => {
       expect(result.decision).toBe('warn');
       expect(result.category).toBe('spike');
       expect(result.dangerScore).toBe(30); // base score
-      expect(result.reason).toBe('💸 COST SPIKE: Single request costs $0.05');
+      expect(result.reason).toBe('COST SPIKE: Single request costs $0.05');
     });
 
     test('should calculate correct danger score for $0.10 cost', () => {
       const result = engine.analyze({
         model: 'gpt-4',
         prompt: 'higher cost',
-        estimatedCost: 0.10,
+        estimatedCost: 0.1,
       });
 
       expect(result.category).toBe('spike');
@@ -209,7 +209,7 @@ describe('DetectionEngine - Strict Behavioral Tests', () => {
       const result = engine.analyze({
         model: 'gpt-4',
         prompt: 'very expensive',
-        estimatedCost: 2.00, // $2.00
+        estimatedCost: 2.0, // $2.00
       });
 
       expect(result.dangerScore).toBe(100); // capped
@@ -247,7 +247,7 @@ describe('DetectionEngine - Strict Behavioral Tests', () => {
 
       expect(result.category).toBe('context');
       expect(result.metadata.contextRatio).toBe(25); // 100/4
-      expect(result.reason).toBe('💸 CONTEXT EXPLOSION: Context is 25.00x larger than prompt');
+      expect(result.reason).toBe('CONTEXT EXPLOSION: Context is 25.00x larger than prompt');
     });
   });
 
@@ -296,7 +296,7 @@ describe('DetectionEngine - Strict Behavioral Tests', () => {
       const result = engine.analyze({
         model: 'gpt-4',
         prompt: 'trust test',
-        estimatedCost: 0.10, // cost spike
+        estimatedCost: 0.1, // cost spike
         trustMode: 'monitor',
       });
 
@@ -364,7 +364,7 @@ describe('DetectionEngine - Strict Behavioral Tests', () => {
       engine.analyze({
         model: 'gpt-4',
         prompt: 'blocked 1',
-        estimatedCost: 2.00, // high cost = block
+        estimatedCost: 2.0, // high cost = block
       });
 
       engine.analyze({

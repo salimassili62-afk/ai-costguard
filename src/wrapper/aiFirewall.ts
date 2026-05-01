@@ -27,9 +27,11 @@
 export {
   withFirewall,
   wrapFunction,
+  withFetchFirewall,
   FirewallOptions,
   OpenAIRequest,
   ChatMessage,
+  FetchLike,
 } from '../middleware/withFirewall';
 
 export {
@@ -43,10 +45,13 @@ export {
 export { AIExecutionFirewall } from './sdk';
 
 // Export detection engine and alert hooks for custom integrations
-export { detectionEngine, AlertHooks } from '../core/DetectionEngine';
+export { detectionEngine, AlertHooks, DetectionResult, AnalyzeInput } from '../core/DetectionEngine';
+export { policyEngine, BudgetStatus, EffectivePolicy } from '../core/PolicyEngine';
+export { FirewallMetadata, TokenBreakdown } from '../core/types';
+export { createStorageAdapter, StorageAdapter, MemoryStorageAdapter, JsonlStorageAdapter } from '../storage';
 
 // Export configuration for budget protection and settings
-export { ConfigManager } from '../config';
+export { ConfigManager, registerPricingModel, getModelPricing, listPricingModels } from '../config';
 
 /**
  * Convenience function to check if a request would be blocked
@@ -55,13 +60,16 @@ export { ConfigManager } from '../config';
 export async function checkRequest(
   model: string,
   prompt: string,
-  estimatedCost?: number
+  estimatedCost?: number,
+  metadata?: import('../core/types').FirewallMetadata
 ): Promise<{
   allowed: boolean;
   blocked: boolean;
   dangerScore: number;
   reason: string;
   category: string;
+  requestId?: string;
+  policyId?: string;
 }> {
   const { detectionEngine } = await import('../core/DetectionEngine');
   const { ConfigManager } = await import('../config');
@@ -74,6 +82,7 @@ export async function checkRequest(
     estimatedCost: estimatedCost || 0,
     trustMode: config.trustMode,
     override: false,
+    metadata,
   });
 
   return {
@@ -82,7 +91,26 @@ export async function checkRequest(
     dangerScore: result.dangerScore,
     reason: result.reason,
     category: result.category,
+    requestId: result.metadata.requestId,
+    policyId: result.metadata.policyId,
   };
+}
+
+export async function recordActualUsage(ledgerId: string, apiResponse: any, model: string): Promise<boolean> {
+  const { costLedger } = await import('../core/CostLedger');
+  return costLedger.recordActualFromResponse(ledgerId, apiResponse, model);
+}
+
+export async function explainDecision(result: import('../core/DetectionEngine').DetectionResult): Promise<string> {
+  const { detectionEngine } = await import('../core/DetectionEngine');
+  return detectionEngine.explainDecision(result);
+}
+
+export async function getBudgetStatus(
+  metadata: import('../core/types').FirewallMetadata = {}
+): Promise<import('../core/PolicyEngine').BudgetStatus> {
+  const { policyEngine } = await import('../core/PolicyEngine');
+  return policyEngine.getBudgetStatus(metadata);
 }
 
 /**
@@ -94,6 +122,8 @@ export async function getFirewallStats(hours: number = 24): Promise<{
   warnedRequests: number;
   totalCost: number;
   preventedCost: number;
+  actualCost: number;
+  totalTokens: number;
 }> {
   const { detectionEngine } = await import('../core/DetectionEngine');
   return detectionEngine.getStats(hours);

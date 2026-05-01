@@ -49,7 +49,7 @@ describe('Concurrency and State Correctness Tests', () => {
       const responses = await Promise.all(promises);
 
       // All should complete
-      expect(responses.every(r => r.status !== undefined)).toBe(true);
+      expect(responses.every((r) => r.status !== undefined)).toBe(true);
 
       // Check state
       const stats = engine.getStats(1);
@@ -71,7 +71,9 @@ describe('Concurrency and State Correctness Tests', () => {
       const responses = await Promise.all(promises);
 
       // All 20 unique prompts should complete (200, 403, 401, or 429)
-      const allCompleted = responses.every(r => r.status === 200 || r.status === 403 || r.status === 401 || r.status === 429);
+      const allCompleted = responses.every(
+        (r) => r.status === 200 || r.status === 403 || r.status === 401 || r.status === 429
+      );
       expect(allCompleted).toBe(true);
 
       // State should reflect 20 requests
@@ -98,14 +100,11 @@ describe('Concurrency and State Correctness Tests', () => {
         )
       );
 
-      const [safeResponses, loopResponses] = await Promise.all([
-        Promise.all(safePromises),
-        Promise.all(loopPromises),
-      ]);
+      const [safeResponses, loopResponses] = await Promise.all([Promise.all(safePromises), Promise.all(loopPromises)]);
 
       // All should complete
-      expect(safeResponses.every(r => r.status !== undefined)).toBe(true);
-      expect(loopResponses.every(r => r.status !== undefined)).toBe(true);
+      expect(safeResponses.every((r) => r.status !== undefined)).toBe(true);
+      expect(loopResponses.every((r) => r.status !== undefined)).toBe(true);
 
       // Check state
       const stats = engine.getStats(1);
@@ -124,12 +123,8 @@ describe('Concurrency and State Correctness Tests', () => {
       }
 
       // Fire all requests
-      const promises = requests.map(req =>
-        axios.post(
-          `http://localhost:${PROXY_PORT}/v1/chat/completions`,
-          req,
-          { validateStatus: () => true }
-        )
+      const promises = requests.map((req) =>
+        axios.post(`http://localhost:${PROXY_PORT}/v1/chat/completions`, req, { validateStatus: () => true })
       );
 
       await Promise.all(promises);
@@ -190,7 +185,7 @@ describe('Concurrency and State Correctness Tests', () => {
       expect(memoryStats.totalRequests).toBe(records.length);
 
       // Verify specific fields
-      const blockedFromRecords = records.filter(r => r.wasBlocked).length;
+      const blockedFromRecords = records.filter((r) => r.wasBlocked).length;
       expect(memoryStats.blockedRequests).toBe(blockedFromRecords);
     });
 
@@ -204,7 +199,7 @@ describe('Concurrency and State Correctness Tests', () => {
           estimatedCost: 0.01,
         });
         timestamps.push(Date.now());
-        await new Promise(r => setTimeout(r, 10)); // Small delay
+        await new Promise((r) => setTimeout(r, 10)); // Small delay
       }
 
       const records = stateStore.getAllRecent(3600000);
@@ -225,15 +220,13 @@ describe('Concurrency and State Correctness Tests', () => {
 
       // Then fire 10 concurrent duplicates
       const promises = Array.from({ length: 10 }, () =>
-        Promise.resolve(
-          engine.analyze({ model: 'gpt-4', prompt, estimatedCost: 0.01 })
-        )
+        Promise.resolve(engine.analyze({ model: 'gpt-4', prompt, estimatedCost: 0.01 }))
       );
 
       const results = await Promise.all(promises);
 
       // All should detect danger (duplicate or loop depending on concurrent count)
-      const allDetectedDanger = results.every(r => r.category === 'duplicate' || r.category === 'loop');
+      const allDetectedDanger = results.every((r) => r.category === 'duplicate' || r.category === 'loop');
       expect(allDetectedDanger).toBe(true);
     });
 
@@ -266,17 +259,14 @@ describe('Concurrency and State Correctness Tests', () => {
       const sdk = new AIExecutionFirewall();
 
       const promises = Array.from({ length: 10 }, (_, i) =>
-        sdk.call(
-          () => Promise.resolve({ result: i }),
-          { model: 'gpt-4', prompt: `sdk concurrent ${i}` }
-        )
+        sdk.call(() => Promise.resolve({ result: i }), { model: 'gpt-4', prompt: `sdk concurrent ${i}` })
       );
 
       const results = await Promise.all(promises);
 
       // All should complete successfully
-      expect(results.every(r => r.success === true)).toBe(true);
-      expect(results.every(r => r.blocked === false)).toBe(true);
+      expect(results.every((r) => r.success === true)).toBe(true);
+      expect(results.every((r) => r.blocked === false)).toBe(true);
 
       // State should show 10 requests
       const stats = engine.getStats(1);
@@ -290,10 +280,7 @@ describe('Concurrency and State Correctness Tests', () => {
       const prompt = 'cross interface race';
 
       // Concurrent SDK and Proxy requests
-      const sdkPromise = sdk.call(
-        () => Promise.resolve({}),
-        { model: 'gpt-4', prompt }
-      );
+      const sdkPromise = sdk.call(() => Promise.resolve({}), { model: 'gpt-4', prompt });
 
       const proxyPromise = axios.post(
         `http://localhost:${PROXY_PORT}/v1/chat/completions`,
