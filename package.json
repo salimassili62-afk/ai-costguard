@@ -1,6 +1,6 @@
 {
   "name": "ai-execution-firewall",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Pre-execution spend protection and cost kill switch for production AI agents",
   "main": "dist/index.js",
   "bin": {
