@@ -45,12 +45,30 @@ describe('CLI - Strict Behavioral Tests', () => {
       
       // Status line
       expect(lines[3]).toMatch(/^Status: \u2705 SAFE TO PROCEED$/);
-      
+
+      // Risk Level line (per spec #13 - must expose risk)
+      expect(lines[4]).toMatch(/^Risk Level: (LOW|MEDIUM|HIGH|CRITICAL)$/);
+
       // Danger score line
-      expect(lines[4]).toMatch(/^Danger Score: 0$/);
-      
-      // Cost line
-      expect(lines[5]).toMatch(/^Estimated Cost: \$[0-9.]+$/);
+      expect(lines[5]).toMatch(/^Danger Score: 0$/);
+
+      // Separator line
+      expect(lines[6]).toMatch(/^─+$/);
+
+      // Universal output format (per spec #11)
+      expect(lines[7]).toMatch(/COST:/);
+      expect(lines[8]).toMatch(/RISK:/);
+      expect(lines[9]).toMatch(/DECISION:/);
+      // No SAVED for safe requests
+
+      // Second separator
+      expect(lines[10]).toMatch(/^─+$/);
+
+      // Universal Format JSON
+      expect(lines[11]).toMatch(/Universal Format:/);
+
+      // Cost line at end
+      expect(lines[lines.length - 1]).toMatch(/^Estimated Cost: \$[0-9.]+$/);
     }, TEST_TIMEOUT);
 
     test('should output exact duplicate detection format', async () => {
@@ -64,10 +82,15 @@ describe('CLI - Strict Behavioral Tests', () => {
       );
 
       const lines = stdout.split('\n').filter(l => l.trim());
-      
-      // Should detect danger (duplicate)
-      expect(lines[3]).toMatch(/Status:/);
-      expect(lines[5]).toMatch(/^Category: duplicate$/);
+
+      // New format has impact-driven banner, check for key elements
+      expect(stdout).toContain('YOU ALMOST LOST');
+      expect(stdout).toContain('BLOCKED BEFORE EXECUTION');
+      expect(stdout).toContain('DETAILS:');
+      expect(stdout).toContain('RISK:');
+      expect(stdout).toContain('DECISION:');
+      expect(stdout).toContain('SAVED:');
+      expect(stdout).toContain('WOULD HAVE LOST:');
     }, TEST_TIMEOUT);
 
     test('should output exact loop/kill-switch format', async () => {
@@ -81,12 +104,15 @@ describe('CLI - Strict Behavioral Tests', () => {
       );
 
       const lines = stdout.split('\n').filter(l => l.trim());
-      
-      // Should detect danger (loop or duplicate)
-      expect(lines[3]).toMatch(/^Status: \u26a0\ufe0f  DANGER DETECTED$/);
-      expect(lines[4]).toMatch(/^Danger Score: \d+$/);
-      expect(lines[5]).toMatch(/^Category: (loop|duplicate)$/);
-      expect(lines[6]).toMatch(/^Reason: /);
+
+      // New format has impact-driven banner, check for key elements
+      expect(stdout).toContain('YOU ALMOST LOST');
+      expect(stdout).toContain('BLOCKED BEFORE EXECUTION');
+      expect(stdout).toContain('DETAILS:');
+      expect(stdout).toContain('RISK:');
+      expect(stdout).toContain('DECISION:');
+      expect(stdout).toContain('SAVED:');
+      expect(stdout).toContain('WOULD HAVE LOST:');
     }, TEST_TIMEOUT);
 
     test('should output exact cost spike format', async () => {
@@ -96,8 +122,11 @@ describe('CLI - Strict Behavioral Tests', () => {
 
       const lines = stdout.split('\n').filter(l => l.trim());
       
-      // Should detect cost spike for large prompts
-      expect(lines[3]).toMatch(/^(Status: \u26a0\ufe0f  DANGER DETECTED|Status: \u2705 SAFE TO PROCEED)$/);
+      // New format has banner for blocked requests, so check for key elements
+      expect(stdout).toContain('AI EXECUTION FIREWALL');
+      expect(stdout).toContain('Model:');
+      expect(stdout).toContain('Tokens:');
+      expect(stdout).toContain('Estimated Cost:');
     }, TEST_TIMEOUT);
   });
 

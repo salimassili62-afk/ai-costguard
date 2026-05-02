@@ -40,8 +40,9 @@ interface OpenAIRequest {
 interface FirewallOptions {
   trustMode?: 'monitor' | 'warn' | 'block';
   overrideBlock?: boolean;
-  onBlock?: (reason: string, dangerScore: number) => void;
-  onWarn?: (reason: string, dangerScore: number) => void;
+  onBlock?: (reason: string, dangerScore: number, estimatedCost: number) => void;
+  onWarn?: (reason: string, dangerScore: number, estimatedCost: number) => void;
+  onSpike?: (requests: number, timeWindow: number) => void;
   debug?: boolean;
 }
 
@@ -130,12 +131,16 @@ function wrap<T extends object>(
             const estimatedCost = estimateCost(model, inputTokens, maxTokens);
 
             // Analyze with DetectionEngine (single source of truth)
+            // Pass alert hooks for real-time notifications
             const result = detectionEngine.analyze({
               model,
               prompt,
               estimatedCost,
               trustMode,
               override: options.overrideBlock || false,
+              onBlock: options.onBlock,
+              onWarn: options.onWarn,
+              onSpike: options.onSpike,
             });
 
             // Handle blocked request
@@ -143,7 +148,7 @@ function wrap<T extends object>(
               logger.warn(`🔴 BLOCKED by Firewall: ${result.reason} (score: ${result.dangerScore})`);
 
               if (options.onBlock) {
-                options.onBlock(result.reason, result.dangerScore);
+                options.onBlock(result.reason, result.dangerScore, estimatedCost);
               }
 
               // Return a rejected promise that mimics OpenAI error format
@@ -163,7 +168,7 @@ function wrap<T extends object>(
               logger.warn(`⚠️  Warning: ${result.reason} (score: ${result.dangerScore})`);
 
               if (options.onWarn) {
-                options.onWarn(result.reason, result.dangerScore);
+                options.onWarn(result.reason, result.dangerScore, estimatedCost);
               }
             }
           }
@@ -227,7 +232,7 @@ export function wrapFunction<T extends (...args: any[]) => Promise<any>>(
       logger.warn(`🔴 BLOCKED: ${result.reason} (score: ${result.dangerScore})`);
 
       if (options.onBlock) {
-        options.onBlock(result.reason, result.dangerScore);
+        options.onBlock(result.reason, result.dangerScore, requestData.estimatedCost || 0);
       }
 
       throw new Error(`Request blocked by AI Execution Firewall: ${result.reason}`);
@@ -238,7 +243,7 @@ export function wrapFunction<T extends (...args: any[]) => Promise<any>>(
       logger.warn(`⚠️  Warning: ${result.reason} (score: ${result.dangerScore})`);
 
       if (options.onWarn) {
-        options.onWarn(result.reason, result.dangerScore);
+        options.onWarn(result.reason, result.dangerScore, requestData.estimatedCost || 0);
       }
     }
 

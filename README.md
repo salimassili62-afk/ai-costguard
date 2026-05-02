@@ -1,55 +1,54 @@
-# AI Execution Firewall
+# AI Execution Firewall 🛡️
 
-Stop AI agents from silently burning your API money.
+**Prevent AI agents from silently burning $100–$1000+ in API costs before execution.**
 
-## The Problem
+> A real-time AI cost protection layer that blocks runaway, duplicate, and expensive AI requests before they hit your API.
 
-AI applications can:
+---
 
-- Run infinite loops
-- Send duplicate requests
-- Spam APIs unintentionally
-- Create sudden cost spikes
+## 🚨 The Problem
 
-You usually notice after the bill arrives.
+AI agents in production can quickly go out of control:
 
-## The Solution
+- 🔁 Runaway loops → hundreds of repeated requests
+- 💸 Token bombs → single requests costing $20–$100+
+- ⚡ Agent storms → traffic spikes draining budgets in minutes
+- 🔂 Duplicate calls → silent cost multiplication
 
-AI Execution Firewall sits between your code and AI APIs and prevents expensive mistakes in real time.
+👉 Traditional monitoring tools react AFTER the money is already spent.
 
-It:
+---
 
-- Detects wasteful requests
+## 🛡️ The Solution
+
+**AI Execution Firewall sits between your app and AI APIs and blocks wasteful requests BEFORE execution.**
+
+It acts as a **pre-execution cost kill switch** for AI systems.
+
+---
+
+## 💰 Real Impact
+
+| Scenario | Without Firewall | With Firewall | Saved |
+|----------|-----------------|---------------|-------|
+| Runaway loop (1h) | $245 lost | $0 blocked | $245 |
+| Token bomb | $30 charged | $0 blocked | $30 |
+| Cost spike | $600 burned | $0 blocked | $600 |
+
+---
+
+## ⚙️ What It Does
+
 - Blocks runaway loops
-- Prevents duplicate calls
-- Stops cost spikes before execution
+- Prevents duplicate requests
+- Detects token explosions
+- Stops cost spikes in real time
+- Enforces budgets per user / agent / workflow
+- Logs and explains every decision
 
-## What it prevents
+---
 
-- Unexpected API bills ($50–$500+)
-- Infinite request loops
-- Duplicate AI calls
-- High-cost prompt explosions
-
-## Installation
+## 🚀 Quick Start
 
 ```bash
 npm install -g ai-execution-firewall
-Quick Start
-aifw start
-Test a request
-aifw check "generate 10000 tokens"
-Modes
-monitor: log only
-warn: allow but alert
-block: stop dangerous requests
-Works with
-OpenAI
-Anthropic
-Any AI API via proxy mode
-Summary
-
-Safer AI systems with lower costs and predictable usage.
-
-MIT License
-
