@@ -350,7 +350,7 @@ export class ExplainabilityLayer {
       ],
       data: {
         'Confidence': `${confidencePercent}%`,
-        'Latency': `${result.latencyMs.toFixed(2)}ms`,
+        'Latency': `${(result.latencyMs ?? 0).toFixed(2)}ms`,
         'Data Quality': behaviorAnalysis ? 'High' : 'Medium',
       },
     };

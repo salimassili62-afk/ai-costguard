@@ -1,20 +1,102 @@
 /**
  * ExecutionInterceptor.ts - DEPRECATED
- * 
+ *
  * This module has been superseded by ExecutionOS.
  * Please use the new AI Execution Operating System from src/os/
- * 
+ *
  * Migration:
  *   Old: const interceptor = new ExecutionInterceptor(config);
  *   New: const os = new ExecutionOS(config);
  *        const client = wrapOpenAI(os, openai, agentId);
  */
 
-export { 
-  ExecutionOS as ExecutionInterceptor,
-  executionOS as executionInterceptor 
-} from '../os/ExecutionOS';
+import { EventEmitter } from 'events';
+import { performance } from 'perf_hooks';
+
+// Type definitions
+export interface ExecutionRequest {
+  id: string;
+  type: string;
+  provider: string;
+  action: string;
+  input: any;
+  estimatedCost: number;
+  context: {
+    tenantId: string;
+    sessionId: string;
+    agentId: string;
+  };
+}
+
+export type ExecutionDecision = 'allow' | 'block' | 'throttle';
+
+export type InterceptionMode = 'sync' | 'async' | 'non-blocking';
+
+export interface ExecutionExplanation {
+  summary: string;
+  details: string[];
+  policyRules: string[];
+  behaviorGraph?: {
+    workflowStep: number;
+    loopDetected: boolean;
+    redundancyScore: number;
+  };
+  costBreakdown?: {
+    currentCost: number;
+    predictedRemaining: number;
+    totalBudget: number;
+  };
+}
+
+export interface ExecutionDecisionResult {
+  decision: ExecutionDecision;
+  reason: string;
+  confidence: number;
+  latencyMs?: number;
+  policyRulesTriggered: string[];
+  explanation?: ExecutionExplanation;
+  costPrediction?: any;
+  throttleParams?: {
+    delayMs: number;
+    rateLimit: number;
+  };
+}
+
+export interface InterceptorOptions {
+  mode: string;
+  tenantId: string;
+  failOpen: boolean;
+  maxLatencyMs: number;
+  localCacheSize: number;
+}
+
+/**
+ * ExecutionInterceptor
+ * Main execution control entry point
+ * @deprecated Use ExecutionOS from src/os/ instead
+ */
+export class ExecutionInterceptor extends EventEmitter {
+  private metrics = {
+    totalRequests: 0,
+    blockedRequests: 0,
+    avgLatencyMs: 0,
+  };
+
+  private options: InterceptorOptions;
+  private localCache: Map<string, ExecutionDecisionResult>;
+  private isHealthy = true;
+
+  constructor(options: Partial<InterceptorOptions> = {}) {
+    super();
+    this.options = {
+      mode: 'local',
+      tenantId: 'default',
+      failOpen: true,
+      maxLatencyMs: 10,
+      localCacheSize: 10000,
+      ...options,
     };
+    this.localCache = new Map();
   }
 
   /**
@@ -23,7 +105,7 @@ export {
    */
   async intercept(request: ExecutionRequest): Promise<ExecutionDecisionResult> {
     const startTime = performance.now();
-    
+
     try {
       // Fast path: local cache lookup (<1ms)
       const cached = this.checkLocalCache(request);
@@ -41,7 +123,7 @@ export {
 
       // Synthesize decision
       const decision = this.synthesizeDecision(policyResult, graphResult, costResult);
-      
+
       // Build explanation
       const explanation = this.buildExplanation(request, policyResult, graphResult, costResult);
 
@@ -66,12 +148,11 @@ export {
         explanation,
         latencyMs: latency,
       };
-
     } catch (error) {
       // Fail-open: log error but allow execution
       if (this.options.failOpen) {
         this.emit('execution:error', { request, error, timestamp: Date.now() });
-        
+
         return {
           decision: 'allow',
           reason: 'Fail-open mode: interceptor error',
@@ -154,7 +235,7 @@ export {
     costResult: any
   ): Omit<ExecutionDecisionResult, 'explanation' | 'latencyMs'> {
     // Priority: Block > Throttle > Allow
-    
+
     // Check for critical violations
     if (policyResult.violations?.some((v: any) => v.severity === 'critical')) {
       return {
@@ -178,7 +259,8 @@ export {
     }
 
     // Check for cost warnings
-    if (costResult.worstCase > 10) { // $10 threshold
+    if (costResult.worstCase > 10) {
+      // $10 threshold
       return {
         decision: 'throttle',
         reason: 'High cost prediction',
@@ -242,19 +324,13 @@ export {
 
   /**
    * Cache decision result
+   */
+  private cacheResult(request: ExecutionRequest, result: ExecutionDecisionResult): void {
+    const key = this.cacheKey(request);
+    this.localCache.set(key, result);
   }
-}
-  
-const key = this.cacheKey(request);
-this.localCache.set(key, result);
-}
 
-/**
-* Generate cache key for request
-*/
-private cacheKey(request: ExecutionRequest): string {
-return `${request.context.tenantId}:${request.context.sessionId}:${request.id}`;
-}
+  /**
    * Generate cache key for request
    */
   private cacheKey(request: ExecutionRequest): string {
@@ -269,10 +345,10 @@ return `${request.context.tenantId}:${request.context.sessionId}:${request.id}`;
     if (decision === 'block') {
       this.metrics.blockedRequests++;
     }
-    
+
     // Simple moving average
-    this.metrics.avgLatencyMs = 
-      (this.metrics.avgLatencyMs * (this.metrics.totalRequests - 1) + latencyMs) / 
+    this.metrics.avgLatencyMs =
+      (this.metrics.avgLatencyMs * (this.metrics.totalRequests - 1) + latencyMs) /
       this.metrics.totalRequests;
   }
 

@@ -189,6 +189,7 @@ export class ProxyServer {
   }
 
   private async handleAnthropicRequest(req: Request, res: Response): Promise<void> {
+    console.log("Proxy test request received: Anthropic");
     try {
       const model = req.body?.model || 'claude-3-sonnet-20240229';
       const messages = req.body?.messages || [];

@@ -69,6 +69,16 @@ export class AECL {
   private memory: ExecutionMemory;
   private telemetry: ROITelemetry;
 
+  // Public method bindings (initialized in constructor)
+  intercept: (request: any) => any;
+  assessRisk: (input: any) => any;
+  evaluatePolicy: (context: any, action: any, cost: any) => any;
+  checkDuplicate: (sessionId: string, inputHash: string, operation: string) => any;
+  logDecision: (decision: any) => void;
+  getROI: () => any;
+  getDashboard: () => any;
+  exportCSV: () => string;
+
   constructor(config: AECLConfig = {}) {
     this.interceptor = new ExecutionInterceptor({
       failOpen: config.failOpen ?? true,
@@ -84,32 +94,17 @@ export class AECL {
     this.policyEngine = new PolicyEngine();
     this.memory = new ExecutionMemory();
     this.telemetry = new ROITelemetry();
+
+    // Initialize method bindings AFTER all dependencies are set
+    this.intercept = this.interceptor.intercept.bind(this.interceptor);
+    this.assessRisk = this.riskEngine.assess.bind(this.riskEngine);
+    this.evaluatePolicy = this.policyEngine.evaluate.bind(this.policyEngine);
+    this.checkDuplicate = this.memory.checkDeduplication.bind(this.memory);
+    this.logDecision = this.telemetry.log.bind(this.telemetry);
+    this.getROI = this.telemetry.get7DayReport.bind(this.telemetry);
+    this.getDashboard = this.telemetry.getDashboardSummary.bind(this.telemetry);
+    this.exportCSV = this.telemetry.exportCSV.bind(this.telemetry);
   }
-
-  /**
-   * Main interception method
-   */
-  intercept = this.interceptor.intercept.bind(this.interceptor);
-
-  /**
-   * Calculate risk score
-   */
-  assessRisk = this.riskEngine.assess.bind(this.riskEngine);
-
-  /**
-   * Evaluate policy
-   */
-  evaluatePolicy = this.policyEngine.evaluate.bind(this.policyEngine);
-
-  /**
-   * Record execution for deduplication
-   */
-  recordExecution = this.memory.record.bind(this.memory);
-
-  /**
-   * Check for duplicates
-   */
-  checkDuplicate = this.memory.checkDeduplication.bind(this.memory);
 
   /**
    * Record execution trace
@@ -126,26 +121,6 @@ export class AECL {
       durationMs: trace.durationMs,
     });
   }
-
-  /**
-   * Log decision for ROI tracking
-   */
-  logDecision = this.telemetry.log.bind(this.telemetry);
-
-  /**
-   * Get ROI metrics
-   */
-  getROI = this.telemetry.get7DayReport.bind(this.telemetry);
-
-  /**
-   * Get dashboard summary
-   */
-  getDashboard = this.telemetry.getDashboardSummary.bind(this.telemetry);
-
-  /**
-   * Export telemetry CSV
-   */
-  exportCSV = this.telemetry.exportCSV.bind(this.telemetry);
 }
 
 // Default instance

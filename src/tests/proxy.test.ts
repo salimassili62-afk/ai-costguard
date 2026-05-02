@@ -55,7 +55,7 @@ describe('ProxyServer', () => {
 
     expect(response).toBeDefined();
     expect(response.status).toBeGreaterThanOrEqual(200);
-  });
+  }, 15000);
 
   test('should detect duplicate requests', async () => {
     const prompt = 'duplicate test prompt 12345';

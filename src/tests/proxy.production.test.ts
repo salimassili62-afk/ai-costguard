@@ -14,36 +14,39 @@ describe('Proxy Production Robustness Tests', () => {
   let mockServer: http.Server;
   const MOCK_PORT = 3461;
 
-  beforeAll((done) => {
+  beforeAll(async () => {
     // Start mock upstream server
-    mockServer = http.createServer((req, res) => {
-      // Echo back request details for verification
-      if (req.url === '/v1/chat/completions') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            id: 'mock-response',
-            object: 'chat.completion',
-            model: 'gpt-mock',
-            choices: [{ message: { role: 'assistant', content: 'mock response' } }],
-            receivedHeaders: req.headers,
-            receivedBody: JSON.parse(body || '{}'),
-          }));
-        });
-      } else {
-        res.writeHead(404);
-        res.end('Not found');
-      }
+    await new Promise<void>((resolve) => {
+      mockServer = http.createServer((req, res) => {
+        // Echo back request details for verification
+        if (req.url === '/v1/chat/completions') {
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', () => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              id: 'mock-response',
+              object: 'chat.completion',
+              model: 'gpt-mock',
+              choices: [{ message: { role: 'assistant', content: 'mock response' } }],
+              receivedHeaders: req.headers,
+              receivedBody: JSON.parse(body || '{}'),
+            }));
+          });
+        } else {
+          res.writeHead(404);
+          res.end('Not found');
+        }
+      });
+      mockServer.listen(MOCK_PORT, () => {
+        resolve();
+      });
     });
-    mockServer.listen(MOCK_PORT, async () => {
-      // Start proxy
-      detectionEngine.clear();
-      proxy = new ProxyServer(PROXY_PORT);
-      await proxy.start();
-      done();
-    });
+
+    // Start proxy after mock server is ready
+    detectionEngine.clear();
+    proxy = new ProxyServer(PROXY_PORT);
+    await proxy.start();
   });
 
   afterAll(async () => {

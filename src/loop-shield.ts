@@ -565,5 +565,3 @@ export function checkLoop(
     estimatedCost,
   });
 }
-
-export { ShieldConfig, AgentAction, LoopDetectionResult };

@@ -230,25 +230,29 @@ program
       console.log(`COST: $${estimatedCost.toFixed(4)}`);
       console.log(`WOULD HAVE LOST: $${result.wouldHaveLost.toFixed(4)}`);
       console.log(chalk.green.bold(`SAVED: $${result.saved.toFixed(4)}`));
+      console.log(`Risk Level: ${result.riskLevel}`);
       
       const riskColor = result.riskLevel === 'CRITICAL' ? chalk.redBright :
                         result.riskLevel === 'HIGH' ? chalk.red :
                         result.riskLevel === 'MEDIUM' ? chalk.yellow : chalk.gray;
       console.log(`RISK: ${riskColor(result.riskLevel)}`);
       console.log(`DECISION: ${chalk.red.bold('BLOCK')}`);
-      console.log(`DANGER SCORE: ${result.dangerScore}`);
+      console.log(`Danger Score: ${result.dangerScore}`);
       console.log(`CATEGORY: ${result.category}`);
       console.log(`REASON: ${result.reason}`);
     } else {
       // ALLOWED - Safe but still show cost
       console.log('');
-      console.log(chalk.green.bold('✅ SAFE TO PROCEED'));
-      console.log(`RISK: ${chalk.green(result.riskLevel)}`);
-      console.log(`DECISION: ${chalk.green.bold('ALLOW')}`);
-      console.log(`COST: $${estimatedCost.toFixed(4)}`);
+      console.log(chalk.green.bold('Status: ✅ SAFE TO PROCEED'));
+      console.log(`Risk Level: ${chalk.green(result.riskLevel)}`);
+      console.log(`Danger Score: ${result.dangerScore}`);
     }
 
     console.log('');
+    console.log('─'.repeat(50));
+    console.log(`COST: ${estimatedCost}`);
+    console.log(`RISK: ${result.riskLevel}`);
+    console.log(`DECISION: ${result.decision.toUpperCase()}`);
     console.log('─'.repeat(50));
     console.log(chalk.gray('Universal Format:'), JSON.stringify({
       cost: estimatedCost,

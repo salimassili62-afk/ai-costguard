@@ -66,7 +66,7 @@ export {
   GlobalPattern,
   IntelligenceContribution,
   IntelligenceReport,
-  DetectionImprovement,
+  GlobalDetectionImprovement,
 } from './GlobalIntelligence';
 
 // Policy Marketplace

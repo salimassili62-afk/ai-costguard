@@ -255,7 +255,7 @@ export class GlobalIntelligence extends EventEmitter {
       byType.set(contrib.patternType, list);
     }
 
-    const improvements: DetectionImprovement[] = [];
+    const improvements: GlobalDetectionImprovement[] = [];
 
     for (const [type, contribs] of byType) {
       const detected = contribs.filter(c => c.outcome === 'detected').length;
