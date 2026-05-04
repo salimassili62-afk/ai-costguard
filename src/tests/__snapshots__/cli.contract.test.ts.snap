@@ -1,0 +1,20 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`CLI Output Contract snapshot protects output contract 1`] = `
+{
+  "command": "metrics",
+  "metrics": {
+    "avg_analysis_latency_ms": 0.9,
+    "blocked_requests_count": 7,
+    "false_positive_indicator": 0.2,
+    "storage_backend": "redis",
+    "total_cost_saved": 10.5,
+  },
+  "payload": {
+    "hours": 24,
+  },
+  "schema": "aifw.cli.output",
+  "timestamp": Any<String>,
+  "version": "1.0.0",
+}
+`;

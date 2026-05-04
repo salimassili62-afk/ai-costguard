@@ -20,6 +20,7 @@ import { detectionEngine } from '../core/DetectionEngine';
 import { stateStore, RequestRecord } from '../core/StateStore';
 import { logger } from '../logger';
 import { sessionStats } from '../core/SessionStats';
+import { createCliOutputContract } from './outputContract';
 
 const program = new Command();
 
@@ -70,10 +71,17 @@ program
   .command('report')
   .description('View firewall protection statistics')
   .option('-h, --hours <hours>', 'Hours to report on', '24')
+  .option('--json', 'Output frozen JSON contract')
   .action((options) => {
     const hours = parseInt(options.hours) || 24;
     // DELEGATE to DetectionEngine (single source of truth)
     const stats = detectionEngine.getStats(hours);
+    const metrics = detectionEngine.getOperationalMetrics(hours);
+
+    if (options.json) {
+      console.log(JSON.stringify(createCliOutputContract('report', { hours, stats }, metrics), null, 2));
+      process.exit(0);
+    }
     
     console.log('\ud83d\udcca FIREWALL PROTECTION REPORT');
     console.log('='.repeat(30));
@@ -182,6 +190,7 @@ program
   .option('-m, --model <model>', 'AI model to use', 'gpt-4')
   .option('--strict', 'Enable strict enforcement (cannot be overridden without config file)')
   .option('-c, --context <size>', 'Context size in KB', '0')
+  .option('--json', 'Output frozen JSON contract')
   .action(async (prompt, options) => {
     const model = options.model || 'gpt-4';
     const contextSizeKB = parseInt(options.context) || 0;
@@ -209,6 +218,33 @@ program
       trustMode: 'warn',
       override: false
     });
+    const metrics = detectionEngine.getOperationalMetrics(24);
+
+    if (options.json) {
+      console.log(
+        JSON.stringify(
+          createCliOutputContract(
+            'check',
+            {
+              model,
+              prompt,
+              estimatedCost,
+              decision: result.decision,
+              riskLevel: result.riskLevel,
+              category: result.category,
+              reason: result.reason,
+              saved: result.saved,
+              wouldHaveLost: result.wouldHaveLost,
+              timingsMs: result.metadata.timingsMs,
+            },
+            metrics
+          ),
+          null,
+          2
+        )
+      );
+      process.exit(0);
+    }
 
     // Format output - Impact-driven "OH SH*T" messaging
     console.log('\ud83d\udee1\ufe0f  AI EXECUTION FIREWALL');
@@ -813,9 +849,16 @@ program
   .command('summary')
   .description('Show session-level cost protection summary')
   .option('-h, --hours <hours>', 'Time period in hours', '24')
+  .option('--json', 'Output frozen JSON contract')
   .action((options) => {
     const hours = parseInt(options.hours) || 24;
     const summary = sessionStats.getSummary(hours);
+    const metrics = detectionEngine.getOperationalMetrics(hours);
+
+    if (options.json) {
+      console.log(JSON.stringify(createCliOutputContract('summary', { hours, summary }, metrics), null, 2));
+      process.exit(0);
+    }
 
     console.log('');
     console.log(chalk.bold('💸 WITHOUT FIREWALL:'));
@@ -845,6 +888,37 @@ program
     console.log('');
     console.log(chalk.gray('Run "aifw dashboard" for detailed metrics'));
     console.log('');
+    process.exit(0);
+  });
+
+program
+  .command('metrics')
+  .description('Show production KPIs that sell ROI')
+  .option('-h, --hours <hours>', 'Hours to report on', '24')
+  .option('--json', 'Output frozen JSON contract')
+  .action((options) => {
+    const hours = parseInt(options.hours) || 24;
+    const metrics = detectionEngine.getOperationalMetrics(hours);
+    if (options.json) {
+      console.log(JSON.stringify(createCliOutputContract('metrics', { hours }, metrics), null, 2));
+      process.exit(0);
+    }
+    console.log('📈 PRODUCTION KPI METRICS');
+    console.log('='.repeat(30));
+    console.log(`Total Cost Saved: $${metrics.total_cost_saved.toFixed(4)}`);
+    console.log(`Blocked Requests: ${metrics.blocked_requests_count}`);
+    console.log(`False Positive Indicator: ${metrics.false_positive_indicator.toFixed(4)}`);
+    console.log(`Avg Analysis Latency: ${metrics.avg_analysis_latency_ms.toFixed(4)}ms`);
+    console.log(`Storage Backend: ${metrics.storage_backend}`);
+    process.exit(0);
+  });
+
+program
+  .command('savings')
+  .description('Show today savings in one line')
+  .action(() => {
+    const metrics = detectionEngine.getOperationalMetrics(24);
+    console.log(`You saved $${metrics.total_cost_saved.toFixed(2)} today`);
     process.exit(0);
   });
 

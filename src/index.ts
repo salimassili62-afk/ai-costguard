@@ -130,6 +130,7 @@ export {
   withFirewallHandler,
   checkRequest,
   getFirewallStats,
+  getFirewallMetrics,
   FirewallOptions,
   FirewallMiddlewareOptions,
   OpenAIRequest,

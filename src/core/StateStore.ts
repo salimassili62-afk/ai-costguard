@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'crypto';
+import { performance } from 'perf_hooks';
 
 export interface RequestRecord {
   id: string;
@@ -37,6 +38,127 @@ export interface StateStats {
 
 const AIFW_DIR = path.join(os.homedir(), '.aifw');
 const HISTORY_FILE = path.join(AIFW_DIR, 'history.jsonl');
+const REDIS_HISTORY_KEY = 'aifw:history';
+const HISTORY_RETENTION_MS = 86400000;
+
+interface StatePersistence {
+  name: 'file' | 'redis';
+  initialize(): Promise<void> | void;
+  append(record: RequestRecord): Promise<void> | void;
+  load(): Promise<RequestRecord[]> | RequestRecord[];
+  clear(): Promise<void> | void;
+}
+
+class FilePersistence implements StatePersistence {
+  name: 'file' = 'file';
+
+  initialize(): void {
+    if (!fs.existsSync(AIFW_DIR)) {
+      fs.mkdirSync(AIFW_DIR, { recursive: true });
+    }
+  }
+
+  load(): RequestRecord[] {
+    if (!fs.existsSync(HISTORY_FILE)) {
+      return [];
+    }
+    const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').split('\n');
+    const records: RequestRecord[] = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const record: RequestRecord = JSON.parse(line);
+        records.push(record);
+      } catch {
+        // skip corrupted line
+      }
+    }
+    return records;
+  }
+
+  append(record: RequestRecord): void {
+    fs.appendFileSync(HISTORY_FILE, JSON.stringify(record) + '\n');
+  }
+
+  clear(): void {
+    if (fs.existsSync(HISTORY_FILE)) {
+      fs.unlinkSync(HISTORY_FILE);
+    }
+  }
+}
+
+type RedisClientLike = {
+  isOpen?: boolean;
+  connect: () => Promise<void>;
+  lRange: (key: string, start: number, stop: number) => Promise<string[]>;
+  rPush: (key: string, value: string) => Promise<number>;
+  del: (key: string) => Promise<number>;
+};
+
+class RedisPersistence implements StatePersistence {
+  name: 'redis' = 'redis';
+  private client: RedisClientLike | null = null;
+  private readonly fallback = new FilePersistence();
+  private ready = false;
+
+  async initialize(): Promise<void> {
+    this.fallback.initialize();
+    try {
+      // Optional dependency: if missing or unavailable, fallback to file persistence.
+      const redisModule = require('redis') as {
+        createClient: (opts: { url: string }) => RedisClientLike;
+      };
+      const url = process.env.REDIS_URL;
+      if (!url) {
+        return;
+      }
+      this.client = redisModule.createClient({ url });
+      if (!this.client.isOpen) {
+        await this.client.connect();
+      }
+      this.ready = true;
+    } catch {
+      this.ready = false;
+    }
+  }
+
+  async load(): Promise<RequestRecord[]> {
+    if (!this.ready || !this.client) {
+      return this.fallback.load();
+    }
+    try {
+      const lines = await this.client.lRange(REDIS_HISTORY_KEY, 0, -1);
+      const records: RequestRecord[] = [];
+      for (const line of lines) {
+        try {
+          records.push(JSON.parse(line));
+        } catch {
+          // skip malformed redis entries
+        }
+      }
+      return records;
+    } catch {
+      return this.fallback.load();
+    }
+  }
+
+  append(record: RequestRecord): void {
+    // Always persist to local file for fallback and observability.
+    this.fallback.append(record);
+    if (!this.ready || !this.client) {
+      return;
+    }
+    void this.client.rPush(REDIS_HISTORY_KEY, JSON.stringify(record)).catch(() => undefined);
+  }
+
+  clear(): void {
+    this.fallback.clear();
+    if (!this.ready || !this.client) {
+      return;
+    }
+    void this.client.del(REDIS_HISTORY_KEY).catch(() => undefined);
+  }
+}
 
 /**
  * Unified StateStore - Singleton
@@ -46,9 +168,11 @@ export class StateStore {
   private static instance: StateStore;
   private cache: Map<string, RequestRecord[]> = new Map();
   private initialized = false;
+  private readonly persistence: StatePersistence;
 
   private constructor() {
-    this.initialize();
+    this.persistence = this.createPersistence();
+    void this.initialize();
   }
 
   static getInstance(): StateStore {
@@ -63,41 +187,25 @@ export class StateStore {
    */
   private initialize(): void {
     if (this.initialized) return;
-
-    // Ensure directory exists
-    if (!fs.existsSync(AIFW_DIR)) {
-      fs.mkdirSync(AIFW_DIR, { recursive: true });
-    }
-
-    // Load existing history into cache
-    this.loadHistory();
+    this.persistence.initialize();
+    void this.loadHistory();
     this.initialized = true;
   }
 
   /**
    * Load all history from disk into memory cache
    */
-  private loadHistory(): void {
-    if (!fs.existsSync(HISTORY_FILE)) {
-      return;
-    }
-
-    const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').split('\n');
-    
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const record: RequestRecord = JSON.parse(line);
-        // Only load records from last 24 hours
-        if (Date.now() - record.timestamp < 86400000) {
-          if (!this.cache.has(record.promptHash)) {
-            this.cache.set(record.promptHash, []);
-          }
-          this.cache.get(record.promptHash)!.push(record);
-        }
-      } catch {
-        // Skip invalid lines
+  private async loadHistory(): Promise<void> {
+    const records = await this.persistence.load();
+    const now = Date.now();
+    for (const record of records) {
+      if (now - record.timestamp >= HISTORY_RETENTION_MS) {
+        continue;
       }
+      if (!this.cache.has(record.promptHash)) {
+        this.cache.set(record.promptHash, []);
+      }
+      this.cache.get(record.promptHash)!.push(record);
     }
   }
 
@@ -141,9 +249,7 @@ export class StateStore {
     }
     this.cache.get(record.promptHash)!.push(record);
 
-    // Append to disk (append-only for performance)
-    const line = JSON.stringify(record) + '\n';
-    fs.appendFileSync(HISTORY_FILE, line);
+    this.persistence.append(record);
   }
 
   /**
@@ -213,9 +319,7 @@ export class StateStore {
    */
   clear(): void {
     this.cache.clear();
-    if (fs.existsSync(HISTORY_FILE)) {
-      fs.unlinkSync(HISTORY_FILE);
-    }
+    this.persistence.clear();
   }
 
   /**
@@ -233,10 +337,42 @@ export class StateStore {
   reset(): void {
     this.cache.clear();
     this.initialized = false;
-    if (fs.existsSync(HISTORY_FILE)) {
-      fs.unlinkSync(HISTORY_FILE);
-    }
+    this.persistence.clear();
     this.initialize();
+  }
+
+  getPersistenceMode(): 'file' | 'redis' {
+    return this.persistence.name;
+  }
+
+  private createPersistence(): StatePersistence {
+    const mode = (process.env.AIFW_STORAGE_BACKEND || 'file').toLowerCase();
+    if (mode === 'redis') {
+      return new RedisPersistence();
+    }
+    return new FilePersistence();
+  }
+
+  getOperationalMetrics(hours: number = 24): {
+    total_cost_saved: number;
+    blocked_requests_count: number;
+    false_positive_indicator: number;
+    avg_analysis_latency_ms: number;
+    storage_backend: 'file' | 'redis';
+  } {
+    const start = performance.now();
+    const stats = this.getStats(hours);
+    const falsePositiveIndicator =
+      stats.warnedRequests > 0
+        ? Number((stats.warnedRequests / Math.max(1, stats.warnedRequests + stats.blockedRequests)).toFixed(4))
+        : 0;
+    return {
+      total_cost_saved: Number(stats.preventedCost.toFixed(4)),
+      blocked_requests_count: stats.blockedRequests,
+      false_positive_indicator: falsePositiveIndicator,
+      avg_analysis_latency_ms: Number((performance.now() - start).toFixed(4)),
+      storage_backend: this.persistence.name,
+    };
   }
 }
 

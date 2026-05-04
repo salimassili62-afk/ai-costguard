@@ -98,3 +98,17 @@ export async function getFirewallStats(hours: number = 24): Promise<{
   const { detectionEngine } = await import('../core/DetectionEngine');
   return detectionEngine.getStats(hours);
 }
+
+/**
+ * ROI-oriented KPI metrics for product dashboards and billing narratives.
+ */
+export async function getFirewallMetrics(hours: number = 24): Promise<{
+  total_cost_saved: number;
+  blocked_requests_count: number;
+  false_positive_indicator: number;
+  avg_analysis_latency_ms: number;
+  storage_backend: 'file' | 'redis';
+}> {
+  const { detectionEngine } = await import('../core/DetectionEngine');
+  return detectionEngine.getOperationalMetrics(hours);
+}

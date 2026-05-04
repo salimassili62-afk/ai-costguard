@@ -19,6 +19,7 @@ import { randomUUID } from 'crypto';
 import { stateStore, RequestRecord } from './StateStore';
 import { DETECTION_THRESHOLDS, TIME_WINDOWS, DECISIONS, ALERT_CATEGORIES } from '../config/constants';
 import { ConfigManager } from '../config';
+import { performance } from 'perf_hooks';
 
 export type Decision = 'allow' | 'warn' | 'block';
 export type Category = 'loop' | 'duplicate' | 'fuzzy_duplicate' | 'context' | 'spike' | 'safe' | 'invalid';
@@ -40,6 +41,15 @@ export interface DetectionResult {
     estimatedCost: number;
     similarity?: number;
     contextRatio?: number;
+    timingsMs?: {
+      total: number;
+      loop: number;
+      duplicate: number;
+      cost: number;
+      budget: number;
+      context: number;
+      fuzzy: number;
+    };
   };
 }
 
@@ -78,6 +88,10 @@ export interface AlertHooks {
  */
 export class DetectionEngine {
   private static instance: DetectionEngine;
+  private timingStats = {
+    totalCalls: 0,
+    cumulativeMs: 0,
+  };
   private readonly KILL_SWITCH_THRESHOLD = DETECTION_THRESHOLDS.KILL_SWITCH;
   private readonly LOOP_THRESHOLD = DETECTION_THRESHOLDS.LOOP_COUNT;
   private readonly LOOP_WINDOW = TIME_WINDOWS.LOOP;
@@ -100,60 +114,73 @@ export class DetectionEngine {
    * This is the ONLY detection method. All interfaces call this.
    */
   analyze(input: AnalyzeInput): DetectionResult {
+    const totalStart = performance.now();
+    const timing = {
+      loop: 0,
+      duplicate: 0,
+      cost: 0,
+      budget: 0,
+      context: 0,
+      fuzzy: 0,
+    };
     const { model, prompt, estimatedCost, context, trustMode = 'warn', override = false } = input;
 
     // Input validation
     if (!prompt || typeof prompt !== 'string' || prompt.trim() === '') {
-      return this.createResult('block', 100, 'invalid', 'Invalid prompt: must be a non-empty string', {
+      return this.withTiming(this.createResult('block', 100, 'invalid', 'Invalid prompt: must be a non-empty string', {
         promptHash: '',
         duplicateCount: 0,
         loopCount: 0,
         estimatedCost: 0
-      });
+      }), totalStart, timing);
     }
 
     if (typeof estimatedCost !== 'number' || estimatedCost < 0) {
-      return this.createResult('block', 100, 'invalid', 'Invalid cost: must be a non-negative number', {
+      return this.withTiming(this.createResult('block', 100, 'invalid', 'Invalid cost: must be a non-negative number', {
         promptHash: '',
         duplicateCount: 0,
         loopCount: 0,
         estimatedCost: 0
-      });
+      }), totalStart, timing);
     }
 
     // Override - allow anything
     if (override) {
       const hash = stateStore.generateHash(prompt, context);
       this.recordRequest(input, hash, false, 0, 'safe', 'Override enabled');
-      return this.createResult('allow', 0, 'safe', 'Override enabled - request allowed', {
+      return this.withTiming(this.createResult('allow', 0, 'safe', 'Override enabled - request allowed', {
         promptHash: hash,
         duplicateCount: 0,
         loopCount: 0,
         estimatedCost
-      });
+      }), totalStart, timing);
     }
 
     // Generate hash
     const promptHash = stateStore.generateHash(prompt, context);
 
     // Check 1: Runaway loop (CRITICAL - highest priority)
+    const loopStart = performance.now();
     const loopCheck = this.detectLoop(promptHash);
+    timing.loop = performance.now() - loopStart;
     if (loopCheck.isLoop) {
       // Score: 90 base + 3 per request beyond threshold, capped at 100
       // r3: 90 + 3*(3-2) = 93, r4: 90 + 3*(4-2) = 96, etc.
       const dangerScore = Math.min(100, 90 + (loopCheck.count - 2) * 3);
       this.recordRequest(input, promptHash, true, dangerScore, 'loop', loopCheck.reason);
-      return this.createResult(
+      return this.withTiming(this.createResult(
         'block',
         dangerScore,
         'loop',
         loopCheck.reason,
         { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
-      );
+      ), totalStart, timing);
     }
 
     // Check 2: Exact duplicate
+    const duplicateStart = performance.now();
     const duplicateCheck = this.detectDuplicate(promptHash);
+    timing.duplicate = performance.now() - duplicateStart;
     if (duplicateCheck.isDuplicate) {
       // Score: 30 base + 10 per duplicate, capped at 90
       // First duplicate = 40 (warn), Second = 50 (block threshold)
@@ -168,17 +195,19 @@ export class DetectionEngine {
       }
       
       this.recordRequest(input, promptHash, true, dangerScore, 'duplicate', duplicateCheck.reason);
-      return this.createResult(
+      return this.withTiming(this.createResult(
         decision,
         dangerScore,
         'duplicate',
         duplicateCheck.reason,
         { promptHash, duplicateCount: duplicateCheck.count, loopCount: loopCheck.count, estimatedCost }
-      );
+      ), totalStart, timing);
     }
 
     // Check 3: Cost spike
+    const costStart = performance.now();
     const costCheck = this.detectCostSpike(estimatedCost);
+    timing.cost = performance.now() - costStart;
     if (costCheck.isSpike) {
       const dangerScore = costCheck.score;
       const decision = this.determineDecision(dangerScore, trustMode);
@@ -189,17 +218,19 @@ export class DetectionEngine {
       }
       
       this.recordRequest(input, promptHash, true, dangerScore, 'spike', costCheck.reason);
-      return this.createResult(
+      return this.withTiming(this.createResult(
         decision,
         dangerScore,
         'spike',
         costCheck.reason,
         { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
-      );
+      ), totalStart, timing);
     }
 
     // Check 3.5: Daily budget protection
+    const budgetStart = performance.now();
     const budgetCheck = this.detectBudgetLimit(estimatedCost);
+    timing.budget = performance.now() - budgetStart;
     if (budgetCheck.wouldExceed) {
       const dangerScore = 75; // High score for budget protection
       const reason = `💰 DAILY BUDGET EXCEEDED: Would exceed $${budgetCheck.budget.toFixed(2)} daily limit`;
@@ -210,23 +241,25 @@ export class DetectionEngine {
       }
       
       this.recordRequest(input, promptHash, true, dangerScore, 'spike', reason);
-      return this.createResult(
+      return this.withTiming(this.createResult(
         'block',
         dangerScore,
         'spike',
         reason,
         { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
-      );
+      ), totalStart, timing);
     }
 
     // Check 4: Context explosion
     if (context) {
+      const contextStart = performance.now();
       const contextCheck = this.detectContextExplosion(prompt, context);
+      timing.context = performance.now() - contextStart;
       if (contextCheck.isExplosion) {
         const dangerScore = contextCheck.score;
         const decision = this.determineDecision(dangerScore, trustMode);
         this.recordRequest(input, promptHash, true, dangerScore, 'context', contextCheck.reason);
-        return this.createResult(
+        return this.withTiming(this.createResult(
           decision,
           dangerScore,
           'context',
@@ -238,17 +271,19 @@ export class DetectionEngine {
             estimatedCost,
             contextRatio: contextCheck.ratio 
           }
-        );
+        ), totalStart, timing);
       }
     }
 
     // Check 5: Fuzzy duplicate
+    const fuzzyStart = performance.now();
     const fuzzyCheck = this.detectFuzzyDuplicate(prompt);
+    timing.fuzzy = performance.now() - fuzzyStart;
     if (fuzzyCheck.isFuzzy) {
       const dangerScore = Math.min(70, 30 + fuzzyCheck.similarity * 40);
       const decision = this.determineDecision(dangerScore, trustMode);
       this.recordRequest(input, promptHash, true, dangerScore, 'fuzzy_duplicate', fuzzyCheck.reason);
-      return this.createResult(
+      return this.withTiming(this.createResult(
         decision,
         dangerScore,
         'fuzzy_duplicate',
@@ -260,18 +295,18 @@ export class DetectionEngine {
           estimatedCost,
           similarity: fuzzyCheck.similarity 
         }
-      );
+      ), totalStart, timing);
     }
 
     // Safe request
     this.recordRequest(input, promptHash, false, 0, 'safe', 'Request is safe');
-    return this.createResult(
+    return this.withTiming(this.createResult(
       'allow',
       0,
       'safe',
       'Request is safe',
       { promptHash, duplicateCount: 0, loopCount: loopCheck.count, estimatedCost }
-    );
+    ), totalStart, timing);
   }
 
   /**
@@ -487,6 +522,23 @@ export class DetectionEngine {
     return stateStore.getStats(hours);
   }
 
+  getOperationalMetrics(hours: number = 24): {
+    total_cost_saved: number;
+    blocked_requests_count: number;
+    false_positive_indicator: number;
+    avg_analysis_latency_ms: number;
+    storage_backend: 'file' | 'redis';
+  } {
+    const storeMetrics = stateStore.getOperationalMetrics(hours);
+    const engineAvg = this.timingStats.totalCalls > 0
+      ? this.timingStats.cumulativeMs / this.timingStats.totalCalls
+      : 0;
+    return {
+      ...storeMetrics,
+      avg_analysis_latency_ms: Number(engineAvg.toFixed(4)),
+    };
+  }
+
   /**
    * Get blocked requests (for blocked command)
    */
@@ -506,6 +558,44 @@ export class DetectionEngine {
    */
   reset(): void {
     stateStore.reset(); // Clear cache, disk, and reinitialize
+  }
+
+  private withTiming(
+    result: DetectionResult,
+    totalStart: number,
+    timing: {
+      loop: number;
+      duplicate: number;
+      cost: number;
+      budget: number;
+      context: number;
+      fuzzy: number;
+    }
+  ): DetectionResult {
+    const total = performance.now() - totalStart;
+    this.timingStats.totalCalls += 1;
+    this.timingStats.cumulativeMs += total;
+    if (process.env.AIFW_TIMING_LOG === 'true') {
+      // Lightweight micro-timing for production debugging without changing default output.
+      console.log(
+        `[aifw-timing] total=${total.toFixed(4)}ms loop=${timing.loop.toFixed(4)} duplicate=${timing.duplicate.toFixed(4)} cost=${timing.cost.toFixed(4)} budget=${timing.budget.toFixed(4)} context=${timing.context.toFixed(4)} fuzzy=${timing.fuzzy.toFixed(4)}`
+      );
+    }
+    return {
+      ...result,
+      metadata: {
+        ...result.metadata,
+        timingsMs: {
+          total: Number(total.toFixed(4)),
+          loop: Number(timing.loop.toFixed(4)),
+          duplicate: Number(timing.duplicate.toFixed(4)),
+          cost: Number(timing.cost.toFixed(4)),
+          budget: Number(timing.budget.toFixed(4)),
+          context: Number(timing.context.toFixed(4)),
+          fuzzy: Number(timing.fuzzy.toFixed(4)),
+        },
+      },
+    };
   }
 }
 
