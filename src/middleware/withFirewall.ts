@@ -1,8 +1,9 @@
 /**
  * AI Execution Firewall - Middleware Layer
  *
- * Provides automatic request interception for OpenAI, fetch, and axios.
- * Uses DEEP RECURSIVE PROXY to intercept ALL nested SDK calls.
+ * This is not a framework.
+ * It is a pre-execution cost + safety enforcement layer for AI systems.
+ * Provides automatic request interception for OpenAI-compatible SDK calls.
  *
  * Usage:
  *   const openai = withFirewall(new OpenAI({ apiKey: '...' }));
@@ -16,11 +17,8 @@
  *   const safeAxios = withFirewall(axios);
  */
 
-import { detectionEngine } from '../core/DetectionEngine';
-import { estimateMessagesTokens } from '../token-counter';
-import { estimateCost } from '../config';
-import { ConfigManager } from '../config';
-import { logger } from '../logger';
+import { ExecutionGuard } from '../firewall/executionGuard';
+import { GuardPolicy } from '../firewall/types';
 
 // Types for OpenAI-compatible clients
 interface ChatMessage {
@@ -38,12 +36,9 @@ interface OpenAIRequest {
 }
 
 interface FirewallOptions {
-  trustMode?: 'monitor' | 'warn' | 'block';
-  overrideBlock?: boolean;
-  onBlock?: (reason: string, dangerScore: number, estimatedCost: number) => void;
-  onWarn?: (reason: string, dangerScore: number, estimatedCost: number) => void;
-  onSpike?: (requests: number, timeWindow: number) => void;
-  debug?: boolean;
+  policy?: Partial<GuardPolicy>;
+  onBlock?: (reason: string, estimatedCost: number) => void;
+  onThrottle?: (reason: string, estimatedCost: number, waitMs: number) => void;
 }
 
 /**
@@ -57,7 +52,7 @@ function extractPrompt(args: any[]): { model: string; prompt: string; maxTokens:
   }
 
   const model = request.model || 'gpt-4';
-  const maxTokens = request.max_tokens || 1000;
+  const maxTokens = request.max_tokens || 512;
 
   let prompt = '';
   if (request.prompt) {
@@ -98,13 +93,8 @@ function isAICall(path: string[]): boolean {
 /**
  * Deep recursive proxy that wraps all nested objects and intercepts method calls
  */
-function wrap<T extends object>(
-  target: T,
-  path: string[] = [],
-  options: FirewallOptions
-): T {
-  const config = new ConfigManager();
-  const trustMode = options.trustMode || config.trustMode;
+function wrap<T extends object>(target: T, path: string[] = [], options: FirewallOptions): T {
+  const guard = new ExecutionGuard(options.policy);
 
   return new Proxy(target, {
     get(obj, prop) {
@@ -114,62 +104,34 @@ function wrap<T extends object>(
       // If it's a function, wrap it to intercept calls
       if (typeof value === 'function') {
         return async function (this: any, ...args: any[]) {
-          // Debug log
-          if (options.debug) {
-            console.log('INTERCEPTED CALL:', newPath.join('.'));
-          }
-
-          // Check if this is an AI API call
           if (isAICall(newPath)) {
             const { model, prompt, maxTokens } = extractPrompt(args);
-
-            // Estimate tokens and cost
-            const messages = args[0]?.messages;
-            const inputTokens = messages
-              ? estimateMessagesTokens(messages, model)
-              : 0;
-            const estimatedCost = estimateCost(model, inputTokens, maxTokens);
-
-            // Analyze with DetectionEngine (single source of truth)
-            // Pass alert hooks for real-time notifications
-            const result = detectionEngine.analyze({
+            const result = guard.evaluate({
               model,
               prompt,
-              estimatedCost,
-              trustMode,
-              override: options.overrideBlock || false,
-              onBlock: options.onBlock,
-              onWarn: options.onWarn,
-              onSpike: options.onSpike,
+              maxOutputTokens: maxTokens,
             });
 
-            // Handle blocked request
-            if (result.decision === 'block' && !options.overrideBlock) {
-              logger.warn(`🔴 BLOCKED by Firewall: ${result.reason} (score: ${result.dangerScore})`);
-
+            if (result.decision === 'block') {
               if (options.onBlock) {
-                options.onBlock(result.reason, result.dangerScore, estimatedCost);
+                options.onBlock(result.reason, result.estimatedCostUsd);
               }
 
-              // Return a rejected promise that mimics OpenAI error format
               return Promise.reject({
                 error: {
-                  message: `Request blocked by AI Execution Firewall: ${result.reason}`,
+                  message: `Request blocked by AI waste firewall: ${result.reason}`,
                   type: 'firewall_blocked',
-                  dangerScore: result.dangerScore,
-                  category: result.category,
+                  estimatedCostUsd: result.estimatedCostUsd,
                 },
                 blocked: true,
               });
             }
 
-            // Handle warning
-            if (result.decision === 'warn') {
-              logger.warn(`⚠️  Warning: ${result.reason} (score: ${result.dangerScore})`);
-
-              if (options.onWarn) {
-                options.onWarn(result.reason, result.dangerScore, estimatedCost);
+            if (result.decision === 'throttle' && result.throttleMs) {
+              if (options.onThrottle) {
+                options.onThrottle(result.reason, result.estimatedCostUsd, result.throttleMs);
               }
+              await new Promise(resolve => setTimeout(resolve, result.throttleMs));
             }
           }
 
@@ -207,47 +169,34 @@ export function wrapFunction<T extends (...args: any[]) => Promise<any>>(
   requestExtractor: (...args: Parameters<T>) => {
     model: string;
     prompt: string;
-    estimatedCost?: number;
+    maxOutputTokens?: number;
   },
   options: FirewallOptions = {}
 ): T {
-  const config = new ConfigManager();
-  const trustMode = options.trustMode || config.trustMode;
+  const guard = new ExecutionGuard(options.policy);
 
   return (async (...args: Parameters<T>): Promise<ReturnType<T>> => {
-    // Extract request data
     const requestData = requestExtractor(...args);
-
-    // Analyze with DetectionEngine
-    const result = detectionEngine.analyze({
+    const result = guard.evaluate({
       model: requestData.model,
       prompt: requestData.prompt,
-      estimatedCost: requestData.estimatedCost || 0,
-      trustMode,
-      override: options.overrideBlock || false,
+      maxOutputTokens: requestData.maxOutputTokens,
     });
 
-    // Handle blocked request
-    if (result.decision === 'block' && !options.overrideBlock) {
-      logger.warn(`🔴 BLOCKED: ${result.reason} (score: ${result.dangerScore})`);
-
+    if (result.decision === 'block') {
       if (options.onBlock) {
-        options.onBlock(result.reason, result.dangerScore, requestData.estimatedCost || 0);
+        options.onBlock(result.reason, result.estimatedCostUsd);
       }
-
-      throw new Error(`Request blocked by AI Execution Firewall: ${result.reason}`);
+      throw new Error(`Request blocked by AI waste firewall: ${result.reason}`);
     }
 
-    // Handle warning
-    if (result.decision === 'warn') {
-      logger.warn(`⚠️  Warning: ${result.reason} (score: ${result.dangerScore})`);
-
-      if (options.onWarn) {
-        options.onWarn(result.reason, result.dangerScore, requestData.estimatedCost || 0);
+    if (result.decision === 'throttle' && result.throttleMs) {
+      if (options.onThrottle) {
+        options.onThrottle(result.reason, result.estimatedCostUsd, result.throttleMs);
       }
+      await new Promise(resolve => setTimeout(resolve, result.throttleMs));
     }
 
-    // Execute original function
     return fn(...args);
   }) as T;
 }

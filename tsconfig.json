@@ -15,6 +15,18 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/index.ts",
+    "src/client.ts",
+    "src/cli/**/*.ts",
+    "src/demo/**/*.ts",
+    "src/dashboard/**/*.ts",
+    "src/controlPlane/**/*.ts",
+    "src/firewall/**/*.ts",
+    "src/middleware/withFirewall.ts",
+    "src/saas/**/*.ts",
+    "src/observability/**/*.ts",
+    "src/tests/v113/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

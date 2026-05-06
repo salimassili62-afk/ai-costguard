@@ -1,139 +1,69 @@
-export * from './config';
-export * from './token-counter';
-export * from './logger';
-export * from './proxy';
-export * from './wrapper';
+/**
+ * AI Cost Guard - Ambient Execution Safety Constraint for AI Systems
+ * 
+ * Runtime enforcement layer that activates automatically.
+ * 
+ * Usage:
+ *   import 'ai-costguard'
+ * 
+ * That's it. Protection is now active. All AI calls are intercepted.
+ * 
+ * System identity: "Ambient execution safety constraint for AI systems"
+ * NOT: tool, SDK, framework, product, middleware
+ * YES: runtime enforcement layer (like TLS for AI)
+ * 
+ * Removing this import makes your AI execution unsafe.
+ */
 
-// Core exports - explicit to avoid conflict with config.Decision
-export { DetectionEngine, detectionEngine, DetectionResult, AnalyzeInput } from './core/DetectionEngine';
-export { StateStore, stateStore, RequestRecord, StateStats } from './core/StateStore';
-export { CostTruthEngine, costTruthEngine, CostTruthResult, CostComparison } from './core/CostTruthEngine';
-export { Logger, logger, LogEntry, LogStats } from './core/Logger';
-export { CostLedger, costLedger, CostLedgerEntry, CostEstimate, CostActual } from './core/CostLedger';
-export { AuditTrail, auditTrail, AuditEntry, AuditStats } from './core/AuditTrail';
-export { PricingConfig, pricingConfig, ModelPricing, TokenUsage, CostCalculation } from './core/PricingConfig';
-export { SessionStatsManager, sessionStats, SessionStats, DailyStats } from './core/SessionStats';
+// === AUTO-ACTIVATE ON IMPORT ===
+// Protection activates immediately when module is loaded
+import { ambientProtection, getAmbientStatus } from './ambient/AmbientProtection';
 
-// AI Execution Control Platform - New Infrastructure Layer
-export {
-  ExecutionInterceptor,
-  executionInterceptor,
-  InterceptionMode,
-  ExecutionDecision,
-  ExecutionRequest,
-  ExecutionDecisionResult,
-  ExecutionExplanation,
-} from './core/ExecutionInterceptor';
+// Console notification
+console.log('[AI Cost Guard] Execution constraint active');
+console.log('[AI Cost Guard] All AI calls will be intercepted');
 
-export {
-  AgentBehaviorGraph,
-  agentBehaviorGraph,
-  AgentAction,
-  AgentActionType,
-  WorkflowState,
-  BehaviorAnalysis,
-  LoopDetectionResult,
-} from './core/AgentBehaviorGraph';
+// === DROP-IN REPLACEMENTS ===
+// Replace your imports with protected versions
 
-export {
-  PolicyEngine,
-  policyEngine,
-  PolicySet,
-  PolicyRule,
-  PolicyCondition,
-  PolicyEvaluationContext,
-  PolicyEvaluationResult,
-  PolicyLevel,
-  EnforcementMode,
-} from './core/PolicyEngine';
+// Replace: import { OpenAI } from 'openai'
+// With:    import { OpenAI } from 'ai-costguard/openai'
+export { OpenAI } from './replacements/openai';
 
-export {
-  CostPredictionEngine,
-  costPredictionEngine,
-  CostPrediction,
-  CostPredictionRequest,
-  BudgetAnalysis,
-  BurnRateMetrics,
-} from './core/CostPredictionEngine';
+// Replace: import { fetch } from 'cross-fetch'
+// With:    import { fetch } from 'ai-costguard/fetch'
+export { fetch } from './replacements/fetch';
 
-export {
-  LearningSystem,
-  learningSystem,
-  AnonymizedPattern,
-  DetectionImprovement,
-  CommunityPattern,
-} from './core/LearningSystem';
+// Replace: import axios from 'axios'
+// With:    import axios from 'ai-costguard/axios'
+export { default as axios } from './replacements/axios';
 
-export {
-  ExplainabilityLayer,
-  explainabilityLayer,
-  ExplanationOutput,
-  ExplanationSection,
-  ExplanationRequest,
-} from './core/ExplainabilityLayer';
+// === STATUS CHECK ===
+// Verify protection is active
+export { getAmbientStatus };
 
-// AI Execution Operating System (AIE-OS) - The mandatory runtime layer
-export {
-  ExecutionOS,
-  executionOS,
-  OSConfig,
-  ExecutionOSMode,
-  ExecutionPhase,
-  SafetyLevel,
-  AgentIdentity,
-  ExecutionContext,
-  ExecutionIntent,
-  ExecutionPlan,
-  ExecutionStep,
-  ExecutionResult,
-  SafetyCheck,
-} from './os/ExecutionOS';
+// === PROJECT STARTERS ===
+// Full working repos, already protected
+export { STARTER_OPENAI_PROTECTED, generateOpenAIStarter } from './starters/openai-protected';
+export { STARTER_EXPRESS_PROTECTED, generateExpressStarter } from './starters/express-protected';
+export { STARTER_SERVERLESS_PROTECTED, generateServerlessStarter } from './starters/serverless-protected';
+export { STARTER_LANGCHAIN_PROTECTED, generateLangChainStarter } from './starters/langchain-protected';
 
-export {
-  SDKInterception,
-  wrapOpenAI,
-  wrapAnthropic,
-} from './os/SDKInterception';
+// === SELF-HOSTED INFRASTRUCTURE ===
+// For running your own protection server
+export { ProductionSaaS, startProductionSaaS } from './saas';
 
-export {
-  GlobalIntelligence,
-  globalIntelligence,
-  PatternType,
-  PatternSignature,
-  GlobalPattern,
-  IntelligenceContribution,
-  IntelligenceReport,
-  GlobalDetectionImprovement,
-} from './os/GlobalIntelligence';
+// === TRUST & VERIFICATION ===
+// Public cryptographic proofs
+export { publicLedger } from './trust/PublicVerificationLedger';
 
-export {
-  PolicyMarketplace,
-  policyMarketplace,
-  PolicyCategory,
-  PolicyStatus,
-  MarketplacePolicy,
-  PolicyRuleDefinition,
-  PolicyPublisher,
-  PolicyReview,
-  PolicyTemplate,
-} from './os/PolicyMarketplace';
+// === SYSTEM STATE ===
+// Current protection status
+export const protection = {
+  active: true,
+  status: getAmbientStatus(),
+  message: 'Execution secured. AI calls intercepted.',
+};
 
-export { createExecutionOS } from './os';
-
-export { AIExecutionFirewall } from './wrapper';
-
-// Middleware exports - AI Execution Firewall as middleware layer
-export {
-  withFirewall,
-  wrapFunction,
-  expressFirewall,
-  withFirewallHandler,
-  checkRequest,
-  getFirewallStats,
-  getFirewallMetrics,
-  FirewallOptions,
-  FirewallMiddlewareOptions,
-  OpenAIRequest,
-  ChatMessage,
-  AIRequestBody,
-} from './wrapper/aiFirewall';
+// Default export is the ambient protection singleton
+export default ambientProtection;
