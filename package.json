@@ -1,6 +1,6 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "A pre-execution firewall that stops AI agents from wasting money before any API call is made",
   "main": "dist/index.js",
   "bin": {
