@@ -29,7 +29,6 @@
     "format:check": "prettier --check src/**/*.ts",
     "preflight": "node scripts/preflight.js",
     "ci": "npm run preflight && npm run lint",
-    "postinstall": "node scripts/postinstall.js",
     "ai:check": "aifw check",
     "ai:dashboard": "aifw dashboard",
     "ai:budget": "aifw budget",
