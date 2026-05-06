@@ -1,6 +1,6 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "A pre-execution firewall that stops AI agents from wasting money before any API call is made",
   "main": "dist/index.js",
   "bin": {
@@ -12,10 +12,10 @@
     "node": ">=18"
   },
   "files": [
-  "dist",
-  "README.md",
-  "package.json"
-],
+    "dist",
+    "README.md",
+    "package.json"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli/index.js start",
