@@ -59,7 +59,9 @@ export function withCostGuard(client: any, config: any, sharedState?: GuardState
             const saveMsg = buildSaveMessage(state, ctx);
             console.error(saveMsg);
 
-            if (guard.onLimitHit) guard.onLimitHit('Limit exceeded', ctx.estimatedCost);
+            if (guard.onLimitHit) {
+            guard.onLimitHit('Limit exceeded', ctx.estimatedCost);
+          }
             throw new CostGuardError(
               saveMsg.replace('[AI CostGuard] ', ''),
               ctx
