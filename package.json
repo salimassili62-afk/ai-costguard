@@ -1,6 +1,6 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "AI Agent Loop & Cost Firewall. Detects infinite loops in autonomous AI agents and kills them before they burn your API budget.",
   "type": "module",
   "main": "./dist/index.cjs",
