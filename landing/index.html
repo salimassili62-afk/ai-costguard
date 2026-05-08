@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI CostGuard — The kill-switch for AI agents</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans antialiased">
+
+  <!-- Hero -->
+  <div class="max-w-3xl mx-auto px-6 py-24 text-center">
+    <h1 class="text-4xl md:text-5xl font-bold mb-4">
+      The kill-switch for AI agents.
+    </h1>
+    <p class="text-lg text-gray-400 mb-8">
+      Prevent runaway loops, token bombs, and budget explosions before they happen.
+    </p>
+
+    <!-- Code snippet -->
+    <div class="bg-gray-800 rounded-lg p-4 text-left font-mono text-sm mb-4 overflow-x-auto border border-gray-700">
+      <pre><code><span class="text-purple-400">npm install</span> <span class="text-green-400">@salimassili/ai-costguard</span></code></pre>
+    </div>
+
+    <div class="bg-gray-800 rounded-lg p-4 text-left font-mono text-sm mb-8 overflow-x-auto border border-gray-700">
+      <pre><code><span class="text-purple-400">const</span> openai = <span class="text-yellow-400">withCostGuard</span>(client, {
+  maxTotalCostPerDay: <span class="text-orange-400">5</span>
+});</code></pre>
+    </div>
+
+    <!-- Killer log -->
+    <div class="bg-gray-800 rounded-lg p-4 text-left font-mono text-sm mb-8 overflow-x-auto border border-gray-700">
+      <pre><code><span class="text-red-400">[CostGuard] BLOCKED LOOP</span> → 12 cycles → estimated save: <span class="text-green-400">$18.42</span></code></pre>
+    </div>
+
+    <!-- CTA -->
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+      <a href="https://github.com/salimassili62-afk/ai-costguard" class="text-gray-400 hover:text-white text-sm underline">
+        GitHub →
+      </a>
+    </div>
+
+    <!-- Why you need this -->
+    <div class="mt-16 text-left">
+      <h2 class="text-xl font-bold mb-4">Install before you deploy</h2>
+      <p class="text-gray-400 mb-4">
+        AI agents don't fail gracefully. They fail exponentially.
+      </p>
+      <ul class="text-gray-400 space-y-2 text-sm">
+        <li>• <strong class="text-gray-200">Recursive loops</strong> — agent repeats the same reasoning forever</li>
+        <li>• <strong class="text-gray-200">Tool retry explosions</strong> — agent retries a failing tool endlessly</li>
+        <li>• <strong class="text-gray-200">Budget breaches</strong> — agent burns tokens rapidly until blocked</li>
+      </ul>
+    </div>
+
+    <!-- Why existing tools fail -->
+    <div class="mt-12 text-left">
+      <h2 class="text-xl font-bold mb-4">Why existing tools fail</h2>
+      <ul class="text-gray-400 space-y-2 text-sm">
+        <li>• <strong class="text-gray-200">Rate limiters</strong> cap speed, not semantic loops</li>
+        <li>• <strong class="text-gray-200">Cost alerts</strong> notify you after the money is gone</li>
+        <li>• <strong class="text-gray-200">Agent frameworks</strong> have no built-in kill-switch</li>
+      </ul>
+    </div>
+
+    <!-- Features -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-16 text-left">
+      <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+        <div class="text-red-400 font-bold text-sm mb-1">Loop detection</div>
+        <div class="text-gray-400 text-sm">Kills repeated prompts</div>
+      </div>
+      <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+        <div class="text-green-400 font-bold text-sm mb-1">Daily cost caps</div>
+        <div class="text-gray-400 text-sm">Hard USD limits</div>
+      </div>
+      <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+        <div class="text-yellow-400 font-bold text-sm mb-1">Token limits</div>
+        <div class="text-gray-400 text-sm">Block oversized calls</div>
+      </div>
+      <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+        <div class="text-purple-400 font-bold text-sm mb-1">RPM limits</div>
+        <div class="text-gray-400 text-sm">Catch API hammering</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="mt-16 text-gray-500 text-sm">
+      <p>MIT License · Built by <a href="https://github.com/salimassili62-afk" class="underline hover:text-gray-300">Salim Assili</a></p>
+    </div>
+  </div>
+
+</body>
+</html>

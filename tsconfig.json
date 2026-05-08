@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["ES2020"],
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
@@ -10,23 +11,10 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": [
-    "src/index.ts",
-    "src/client.ts",
-    "src/cli/**/*.ts",
-    "src/demo/**/*.ts",
-    "src/dashboard/**/*.ts",
-    "src/controlPlane/**/*.ts",
-    "src/firewall/**/*.ts",
-    "src/middleware/withFirewall.ts",
-    "src/saas/**/*.ts",
-    "src/observability/**/*.ts",
-    "src/tests/v113/**/*.ts"
-  ],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

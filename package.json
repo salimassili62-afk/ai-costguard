@@ -1,83 +1,46 @@
 {
   "name": "@salimassili/ai-costguard",
   "version": "1.1.7",
-  "description": "A pre-execution firewall that stops AI agents from wasting money before any API call is made",
-  "main": "dist/index.js",
-  "bin": {
-    "ai-firewall": "dist/cli/index.js",
-    "aifw": "dist/cli/index.js",
-    "ai-execution-firewall": "dist/bin/start.js"
-  },
-  "engines": {
-    "node": ">=18"
+  "description": "AI Agent Loop & Cost Firewall. Detects infinite loops in autonomous AI agents and kills them before they burn your API budget.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
   },
   "files": [
     "dist",
-    "README.md",
-    "package.json"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc",
-    "start": "node dist/cli/index.js start",
-    "dev": "ts-node src/cli/index.ts",
-    "test": "jest --runInBand",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage --coverageThreshold='{\"global\":{\"branches\":70,\"functions\":70,\"lines\":70,\"statements\":70}}'",
-    "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
-    "format": "prettier --write src/**/*.ts",
-    "format:check": "prettier --check src/**/*.ts",
-    "preflight": "node scripts/preflight.js",
-    "ci": "npm run preflight && npm run lint",
-    "ai:check": "aifw check",
-    "ai:dashboard": "aifw dashboard",
-    "ai:budget": "aifw budget",
-    "ai:report": "aifw report"
+    "test": "node test/smoke.mjs",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "ai",
-    "firewall",
-    "protection",
     "openai",
-    "anthropic",
-    "agent-safety",
-    "api-security"
+    "llm",
+    "cost-control",
+    "agent",
+    "firewall"
   ],
   "author": "Salim Assili",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/salimassili62-afk/ai-waste-guard.git"
-  },
-  "bugs": {
-    "url": "https://github.com/salimassili62-afk/ai-waste-guard/issues"
-  },
-  "homepage": "https://github.com/salimassili62-afk/ai-waste-guard#readme",
-  "dependencies": {
-    "axios": "^1.6.2",
-    "chalk": "^4.1.2",
-    "commander": "^11.1.0",
-    "express": "^4.18.2",
-    "openai": "^6.34.0"
+  "engines": {
+    "node": ">=18"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^20.10.5",
-    "@typescript-eslint/eslint-plugin": "^8.59.2",
-    "@typescript-eslint/parser": "^8.59.2",
-    "eslint": "^8.56.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^5.1.2",
-    "jest": "^30.3.0",
-    "prettier": "^3.1.1",
-    "ts-jest": "^29.4.9",
-    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
-  },
-  "directories": {
-    "example": "examples"
-  },
-  "type": "commonjs",
-  "types": "./dist/index.d.ts"
+  }
 }
