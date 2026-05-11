@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  code, pre {
+    font-family: 'JetBrains Mono', 'Monaco', 'Menlo', monospace;
+  }
+}
+
+@layer components {
+  .terminal {
+    @apply bg-gray-900 border border-gray-800 rounded-lg p-4 font-mono text-sm;
+  }
+  
+  .terminal-line {
+    @apply text-gray-300;
+  }
+  
+  .terminal-error {
+    @apply text-red-500;
+  }
+  
+  .terminal-success {
+    @apply text-green-500;
+  }
+  
+  .terminal-warning {
+    @apply text-yellow-500;
+  }
+}

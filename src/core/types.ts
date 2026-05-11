@@ -1,18 +1,12 @@
 /**
- * Minimal types for AI CostGuard MVP
+ * AI CostGuard — Simplified types for 10/10 experience
  */
 
-export interface CostGuardConfig {
-  /** Max tokens per single request */
-  maxTokensPerRequest: number;
-  /** Max requests per minute */
-  maxRequestsPerMinute: number;
-  /** Max total cost per day in USD */
-  maxTotalCostPerDay: number;
-  /** Enable loop detection */
-  loopDetection: boolean;
-  /** Alert callback when limit hit */
-  onLimitHit?: (reason: string, cost: number) => void;
+export interface GuardConfig {
+  /** Daily budget in USD */
+  budget: number;
+  /** Enable behavioral analysis */
+  behaviorAnalysis?: boolean;
 }
 
 export interface RequestContext {
@@ -27,7 +21,6 @@ export interface GuardState {
   requestCount: number;
   totalCost: number;
   lastRequestTime: number;
-  recentPrompts: string[];
   blockedCount: number;
 }
 

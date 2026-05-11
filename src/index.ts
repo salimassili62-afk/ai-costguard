@@ -1,21 +1,16 @@
 /**
- * AI CostGuard — AI Agent Loop & Cost Firewall
- *
- * Detects infinite loops in autonomous AI agents and kills them
- * before they burn your API budget.
- *
- * Wraps your AI client. Enforces hard limits.
- * When it blocks, it tells you exactly how much it saved.
- *
+ * AI CostGuard — RUNTIME FINANCIAL EXECUTION CONTROL LAYER
+ * 
+ * 🟦 FREE: Local illusion of safety (each process thinks it is safe)
+ * 🟥 PAID: System-wide financial control (the system sees everything as one budget)
+ * 
+ * NOT: logging, monitoring, middleware, analytics
+ * IS: distributed cost firewall for AI systems
+ * 
  * @example
- * import { OpenAI } from 'openai';
- * import { withCostGuard } from '@salimassili/ai-costguard';
- *
- * const openai = withCostGuard(
- *   new OpenAI({ apiKey: 'sk-...' }),
- *   { maxTotalCostPerDay: 5.00 }
- * );
+ * const ai = guard(openai)
  */
 
-export { withCostGuard, costGuardMiddleware, CostGuardError, getPricing } from './core/CostGuard.js';
-export type { CostGuardConfig, RequestContext, GuardState } from './core/types.js';
+export { guard, GuardError, middleware, getPricing } from './core/GuardFree.js';
+export { GuardPro, validateLicense, getProGuard } from './core/GuardPro.js';
+export type { GuardConfig } from './core/types.js';
