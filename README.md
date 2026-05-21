@@ -1,4 +1,5 @@
 # AI CostGuard
+[![npm version](https://img.shields.io/npm/v/@salimassili/ai-costguard)](https://www.npmjs.com/package/@salimassili/ai-costguard)
 
 AI CostGuard is a small TypeScript library that wraps OpenAI-like clients and blocks requests before they run when local safety checks predict unsafe AI API spend.
 
