@@ -1,233 +1,202 @@
-# AI CostGuard - Smoke Detector + Circuit Breaker for AI Agents
+# AI CostGuard
 
-**"Smoke detector + circuit breaker for AI systems."**
+AI CostGuard is a small TypeScript library that wraps OpenAI-like clients and blocks requests before they run when local safety checks predict unsafe AI API spend.
 
-Install in 60 seconds. Save thousands from catastrophic AI disasters.
+It is ESM-only, targets Node.js 18+, and is built with `tsc`.
 
----
+## What Works Today
 
-## 🚨 CATASTROPHIC INCIDENT
+- `guard()` wraps a client with budget, loop, and retry protection.
+- `GuardError` is thrown when a request is blocked.
+- Budget blocking estimates request cost before the API call.
+- Loop detection blocks repeated prompts within the current process.
+- Retry detection blocks repeated failure/retry prompts within the current process.
+- `middleware()` adds the same local checks to web request flows.
+- `getPricing()` returns known built-in model pricing.
+- `registerPricing()` and `listPricing()` let you manage runtime pricing entries.
 
-**AI agent entered infinite retry loop. Started burning $3,000/hour. Free version didn't stop it. Company lost $24,000 overnight.**
-
----
-
-## 🛑 SOLUTION
-
-**Emergency brake for AI agents.**
-
----
-
-## 🟦 FREE VERSION - SMOKE DETECTOR
-
-**Smoke detector for development.**
-
-```ts
-import { guard } from '@salimassili/ai-costguard';
-
-const ai = guard(openai); // One line magic
-```
-
-**What it detects:**
-- Hard budget limits
-- Infinite loops (2x repetition)
-- Retry storms (1x failure pattern)
-- Token explosions (20x spikes)
-
-**Output:**
-```
-🚨 SMOKE DETECTOR: Infinite loop → saved $18.42
-```
-
-**WARNING:** Single process only. Not production safe.
-
----
-
-## 🟥 PAID VERSION - CIRCUIT BREAKER
-
-**Circuit breaker that saves companies thousands.**
-
-```ts
-import { getProGuard } from '@salimassili/ai-costguard';
-
-const breaker = getProGuard("LICENSE_KEY", {
-  slack: { webhook: "webhook_url", channel: "#alerts" }
-});
-
-breaker.activateCircuitBreaker({
-  projectId: "production", 
-  budget: 5000
-});
-
-breaker.panicShutdown("production"); // Panic button
-```
-
-**What it saves:**
-- Hard global budget limits (cross-instance)
-- Instant emergency shutdown
-- Global usage caps
-- Real-time spend tracking
-- Slack/Discord panic alerts
-- Distributed coordination (2-second sync)
-- Simple policy rules
-
----
-
-## 💥 TERRIFYING DEMO
-
-**Scenario:** AI agent processing user data goes into infinite retry loop.
-
-**Free version:** Each server thinks it's fine. Cost explodes to $15,000/hour.
-
-**Paid version:** Circuit breaker detects pattern across all servers. Panic shutdown activated in 8 seconds. Company saves $12,000.
-
----
-
-## 🚀 60-SECOND MAGICAL INSTALLATION
+## Install
 
 ```bash
 npm install @salimassili/ai-costguard
 ```
 
-### Development (FREE)
+## Basic Usage
+
+```ts
+import OpenAI from 'openai';
+import { guard, GuardError } from '@salimassili/ai-costguard';
+
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const ai = guard(client, { budget: 1 });
+
+try {
+  const response = await ai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: 'Write a short project summary.' }],
+    max_tokens: 200
+  });
+
+  console.log(response);
+} catch (error) {
+  if (error instanceof GuardError) {
+    console.error('AI request blocked:', error.message, error.context);
+  } else {
+    throw error;
+  }
+}
+```
+
+## How `guard()` Works
+
+`guard(client, config)` returns a `Proxy` around your client. When code calls a method such as `client.chat.completions.create(...)`, CostGuard:
+
+1. Reads the request model, messages, and `max_tokens`.
+2. Estimates input tokens from message length and combines them with the requested output limit.
+3. Looks up pricing for the model.
+4. Estimates the request cost.
+5. Blocks the call with `GuardError` if the local budget would be exceeded.
+6. Blocks repeated prompts that look like loops.
+7. Blocks repeated prompts that look like retry storms.
+8. Lets the original client method run when checks pass.
+
+The free guard state is process-local. Separate Node.js processes do not share budget state.
+
+## Budget Blocking
+
 ```ts
 import { guard } from '@salimassili/ai-costguard';
-import OpenAI from 'openai';
 
-const ai = guard(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
+const ai = guard(openai, { budget: 0.25 });
 
-// Your AI code works normally, but protected
-const response = await ai.chat.completions.create({
-  model: 'gpt-4',
-  messages: [{ role: 'user', content: 'Hello' }]
+await ai.chat.completions.create({
+  model: 'gpt-4o-mini',
+  messages: [{ role: 'user', content: 'Hello' }],
+  max_tokens: 100
 });
 ```
 
-### Production (PAID)
+When the estimated cumulative spend in the current process would exceed `budget`, CostGuard throws `GuardError` before calling the underlying AI client.
+
+## Loop And Retry Detection
+
+CostGuard keeps a short in-memory history of recent prompts for the wrapped client:
+
+- Loop detection blocks repeated prompt hashes.
+- Retry detection blocks repeated prompts containing retry/failure language such as `retry`, `again`, `repeat`, `error`, `fail`, or `timeout`.
+
+These checks are intentionally local and lightweight.
+
+## Middleware
+
 ```ts
-import { getProGuard } from '@salimassili/ai-costguard';
+import express from 'express';
+import { middleware, GuardError } from '@salimassili/ai-costguard';
 
-// Activate circuit breaker
-const breaker = getProGuard(process.env.COSTGUARD_LICENSE, {
-  slack: { webhook: process.env.SLACK_WEBHOOK, channel: "#ai-alerts" }
+const app = express();
+
+app.use(middleware({ budget: 2 }));
+
+app.post('/chat', async (req, res, next) => {
+  try {
+    req.localSafety.check({
+      model: 'gpt-4o-mini',
+      tokens: 1000,
+      estimatedCost: 0.001,
+      timestamp: Date.now(),
+      prompt: req.body?.prompt ?? ''
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    if (error instanceof GuardError) {
+      res.status(402).json({ error: error.message, context: error.context });
+      return;
+    }
+
+    next(error);
+  }
 });
-
-breaker.activateCircuitBreaker({
-  projectId: "production",
-  budget: 10000
-});
-
-// Your AI code is now circuit-protected
 ```
 
----
+## Pricing
 
-## 🎯 TARGET USERS
+```ts
+import { getPricing, listPricing, registerPricing } from '@salimassili/ai-costguard';
 
-- **AI agent startups** - Can't afford $10k mistakes
-- **Founders using OpenAI/Claude in production** - Need sleep at night
-- **Teams running autonomous workflows** - Multiple instances, high risk
-- **Companies spending $1k+/month on AI APIs** - High exposure
+console.log(getPricing('gpt-4o-mini'));
 
----
+registerPricing([
+  {
+    model: 'custom-model',
+    inputPer1kTokens: 0.001,
+    outputPer1kTokens: 0.002,
+    lastUpdated: '2026-05-21',
+    source: 'internal'
+  }
+]);
 
-## 💰 ROI
+console.log(listPricing());
+```
 
-**Free:** Saves $100s in development, proves value immediately
-**Paid:** Prevents $5,000-$50,000 production disasters
+`getPricing(model)` returns an exact match when available, then falls back to simple fuzzy matching. Unknown models return `undefined`.
 
-**Question:** Can you afford NOT to have this installed?
+## Pro Features (Coming Soon)
 
----
+> These features are under active development and not yet available:
+> - Distributed Redis-backed budget state
+> - Real Slack/Discord webhook alerts
+> - Multi-instance coordination
+> - Production license validation
 
-## 🔧 CORE FEATURES (ONLY 10)
+## API
 
-1. **Hard global budget limits** - Stop spending instantly
-2. **Instant kill switch** - Emergency shutdown button
-3. **Infinite loop detection** - Stop runaway agents
-4. **Retry storm detection** - Kill retry explosions
-5. **Token explosion detection** - Prevent cost spikes
-6. **Emergency execution shutdown** - Panic button for all instances
-7. **Global usage caps** - Cross-instance coordination
-8. **Slack/Discord panic alerts** - Real-time emergency notifications
-9. **Real-time spend tracking** - Live monitoring
-10. **Simple policy rules** - Configurable thresholds
+### `guard(client, config)`
 
----
+Wraps an OpenAI-like client.
 
-## 🛠️ TECH STACK
+```ts
+guard(client, { budget: 10 });
+```
 
-- **TypeScript-first** - Full type safety
-- **Redis-ready** - Distributed state management
-- **Proxy-based** - Zero integration overhead
-- **OpenAI + Anthropic** - Major providers supported
-- **Minimal dependencies** - Lightweight, secure
-- **Serverless-friendly** - Works anywhere
-- **Production-ready** - Battle tested
+### `GuardError`
 
----
+Thrown when CostGuard blocks a request.
 
-## 🚫 WHAT WE DON'T DO
+```ts
+try {
+  await ai.chat.completions.create(params);
+} catch (error) {
+  if (error instanceof GuardError) {
+    console.log(error.context);
+  }
+}
+```
 
-❌ No dashboards  
-❌ No analytics  
-❌ No enterprise complexity  
-❌ No governance systems  
-❌ No features nobody pays for  
+### `middleware(config)`
 
-**We do ONE thing: Prevent catastrophic AI cost disasters.**
+Creates request middleware with local budget, loop, and retry checks.
 
----
+### `getPricing(model, overrides?)`
 
-## 🎯 POSITIONING
+Returns pricing for a model from overrides, runtime registrations, or built-in entries.
 
-**"Every production AI system should have this installed."**
+### `registerPricing(entries)`
 
-**This is not a tool. This is insurance.**
+Registers or replaces runtime pricing entries by model name.
 
----
+### `listPricing()`
 
-## 💥 MARKETING STORIES
+Returns built-in and runtime pricing entries, deduplicated by model name.
 
-### Story 1: The $15,000 Mistake
-"AI agent processing customer feedback entered infinite retry loop. Free version on each server thought everything was fine. Cost exploded to $15,000/hour. Circuit breaker killed all instances in 8 seconds. Company saved $12,000."
+## Limitations
 
-### Story 2: The $3,000 Overnight Bill
-"Background job processing user data got stuck in recursive tool calls. Each server kept retrying independently. Free version didn't coordinate across instances. Paid version detected global pattern and panic shutdown. Saved $3,000."
+- Free guard state is stored in memory only.
+- Budget checks are estimates, not billing records.
+- Token estimation is approximate.
+- Pricing entries are static until the package or runtime registry is updated.
+- The library does not include dashboards, analytics, governance workflows, or hosted services.
 
-### Story 3: The $50,000 Disaster
-"Autonomous workflow system went into runaway execution chain. 12 servers burning $4,000/hour each. Circuit breaker detected anomaly across all instances and emergency shutdown. Prevented $50,000 disaster."
+## License
 
----
-
-## 🏆 TRUST MOAT
-
-**Why companies can't replace this:**
-
-✅ **Reliability** - Works when everything else fails  
-✅ **Trust** - Saves companies thousands, proves value instantly  
-✅ **Integration** - One-line installation, zero overhead  
-✅ **Emergency response** - Panic button works in seconds  
-✅ **Distributed coordination** - Handles multi-instance disasters  
-
-**Not because of complexity, but because it's the reliable emergency brake for AI agents.**
-
----
-
-## 🚀 PATH TO $5K+ MRR
-
-1. **Free version drives viral adoption** - Developers install in 60 seconds
-2. **Production incidents create urgency** - Real disasters create immediate need
-3. **Paid version becomes unavoidable** - Can't safely run AI in production without it
-4. **Emergency alerts prove value** - Slack notifications save thousands
-5. **Trust creates lock-in** - Reliable circuit breaker becomes infrastructure
-
----
-
-## 🎯 FINAL PHILOSOPHY
-
-**"If this is not installed, your AI infrastructure is financially unsafe."**
-
----
-
-MIT | [GitHub](https://github.com/salimassili62-afk/ai-costguard)
+MIT

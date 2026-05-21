@@ -1,13 +1,9 @@
 import OpenAI from 'openai';
-import { withFirewall } from '../src';
+import { guard } from '../src';
 
-const client = withFirewall(
+const client = guard(
   new OpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '' }),
-  {
-    onBlock: (reason, usd) => {
-      console.error(`Blocked before API call: ${reason} (estimated $${usd.toFixed(4)})`);
-    },
-  }
+  { budget: 10 }
 );
 
 async function main() {

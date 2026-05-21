@@ -5,7 +5,7 @@
  * CostGuard detects the repetition, blocks it, and shows the estimated save.
  */
 
-import { withCostGuard, CostGuardError } from '../src/index';
+import { guard, GuardError } from '../src/index';
 
 const fakeOpenAI = {
   chat: {
@@ -19,10 +19,7 @@ const fakeOpenAI = {
   },
 };
 
-const openai = withCostGuard(fakeOpenAI, {
-  maxTotalCostPerDay: 100.00,
-  loopDetection: true,
-});
+const openai = guard(fakeOpenAI, { budget: 100.00 });
 
 async function main() {
   const prompt = 'Are we there yet?';
@@ -36,7 +33,7 @@ async function main() {
         messages: [{ role: 'user', content: prompt }],
       });
     } catch (err) {
-      if (err instanceof CostGuardError) {
+      if (err instanceof GuardError) {
         console.log('\n✅ Loop killed. Agent stopped before it could spiral.');
         break;
       }

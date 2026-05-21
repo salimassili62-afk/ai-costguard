@@ -5,13 +5,13 @@
  */
 
 import express from 'express';
-import { costGuardMiddleware, CostGuardError } from '../src/index';
+import { middleware } from '../src/index';
 
 const app = express();
 app.use(express.json());
 
 // Apply cost guard to all routes
-app.use(costGuardMiddleware({ maxTotalCostPerDay: 10.00 }));
+app.use(middleware({ budget: 10.00 }));
 
 app.post('/chat', async (req, res) => {
   const { message } = req.body;

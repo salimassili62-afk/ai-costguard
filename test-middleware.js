@@ -1,30 +1,27 @@
-const OpenAI = require("openai");
-const { withFirewall } = require("./dist/middleware/withFirewall");
+import { guard, GuardError } from "./dist/index.js";
 
-// 👇 client حقيقي (حتى لو API key غلط)
-const client = new OpenAI({
-  apiKey: "fake-key"
-});
+const fakeAI = {
+  chat: {
+    completions: {
+      create: async () => ({ ok: true }),
+    },
+  },
+};
 
-// 👇 فعل debug
-const safeAI = withFirewall(client, {
-  debug: true,
-  trustMode: "block",
-  onBlock: (reason) => {
-    console.log("🔥 BLOCKED:", reason);
+const safeAI = guard(fakeAI, { budget: 0.001 });
+
+try {
+  console.log("BEFORE CALL");
+
+  await safeAI.chat.completions.create({
+    model: "gpt-4",
+    messages: [{ role: "user", content: "Hello" }],
+    max_tokens: 1000,
+  });
+} catch (err) {
+  if (err instanceof GuardError) {
+    console.log("BLOCKED:", err.message);
+  } else {
+    console.log("ERROR:", err.message || err);
   }
-});
-
-(async () => {
-  try {
-    console.log("🚀 BEFORE CALL");
-
-    await safeAI.chat.completions.create({
-      model: "gpt-4",
-      messages: [{ role: "user", content: "Hello" }]
-    });
-
-  } catch (err) {
-    console.log("❌ ERROR:", err.message || err);
-  }
-})();
+}

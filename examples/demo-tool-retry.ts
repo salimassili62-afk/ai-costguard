@@ -5,7 +5,7 @@
  * CostGuard detects the endless retries and kills the loop.
  */
 
-import { withCostGuard, CostGuardError } from '../src/index';
+import { guard, GuardError } from '../src/index';
 
 // Fake agent with a failing tool integration
 const fakeAgent = {
@@ -35,11 +35,7 @@ const fakeAgent = {
 };
 
 // Wrap with strict retry limits
-const agent = withCostGuard(fakeAgent, {
-  maxTotalCostPerDay: 5,
-  maxRequestsPerMinute: 3,  // Very strict to catch hammering
-  loopDetection: true
-});
+const agent = guard(fakeAgent, { budget: 5 });
 
 async function main() {
   console.log('=== Tool Retry Explosion Demo ===\n');
@@ -59,7 +55,7 @@ async function main() {
       // Small delay to simulate real retry timing
       await new Promise(r => setTimeout(r, 100));
     } catch (err) {
-      if (err instanceof CostGuardError) {
+      if (err instanceof GuardError) {
         console.log('\n✅ RETRY EXPLOSION BLOCKED');
         console.log(`   ${err.message}`);
         console.log('\n💰 Prevented runaway retry loop.');

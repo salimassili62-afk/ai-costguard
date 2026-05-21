@@ -1,47 +1,33 @@
 /**
  * OpenAI Integration Example
- * 
- * This shows how to use AI Execution Firewall with OpenAI SDK
+ *
+ * This shows how to use AI CostGuard with the OpenAI SDK.
  */
 
 import OpenAI from 'openai';
-import { AIExecutionFirewall } from 'ai-execution-firewall';
+import { guard, GuardError } from '../src/index';
 
-// Initialize the firewall
-const firewall = new AIExecutionFirewall();
-
-// Initialize OpenAI with your API key
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = guard(
+  new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  }),
+  { budget: 10 }
+);
 
 async function main() {
-  const messages = [
-    { role: 'user', content: 'Explain quantum computing in simple terms' }
-  ];
-
-  // Wrap the OpenAI call with firewall protection
-  const result = await firewall.call(
-    async () => {
-      return await openai.chat.completions.create({
-        model: 'gpt-4',
-        messages,
-      });
-    },
-    {
+  try {
+    const response = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages,
-    }
-  );
+      messages: [{ role: 'user', content: 'Explain quantum computing in simple terms' }],
+    });
 
-  if (result.success && result.data) {
-    console.log('Response:', result.data.choices[0].message.content);
-  } else if (result.blocked) {
-    console.log('🔴 Request blocked:', result.reason);
-    console.log('💰 Money saved:', result.savedAmount);
-    if (result.killSwitchTriggered) {
-      console.log('🚨 Kill switch was triggered');
+    console.log('Response:', response.choices[0].message.content);
+  } catch (error) {
+    if (error instanceof GuardError) {
+      console.log('Request blocked:', error.message);
+      return;
     }
+    throw error;
   }
 }
 

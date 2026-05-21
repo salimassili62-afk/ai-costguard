@@ -102,9 +102,9 @@ function createExampleFile(projectType) {
 // Copy this to your lib/openai.ts or utils/openai.ts
 
 import OpenAI from 'openai';
-import { withFirewall } from 'ai-execution-firewall';
+import { guard } from '@salimassili/ai-costguard';
 
-export const openai = withFirewall(
+export const openai = guard(
   new OpenAI({ apiKey: process.env.OPENAI_API_KEY }),
   {
     trustMode: 'block',
@@ -148,10 +148,10 @@ app.use(expressFirewall({
   } else {
     exampleCode = `// AI Execution Firewall - Node.js Example
 
-import { withFirewall } from 'ai-execution-firewall';
+import { guard } from '@salimassili/ai-costguard';
 import OpenAI from 'openai';
 
-const openai = withFirewall(
+const openai = guard(
   new OpenAI({ apiKey: process.env.OPENAI_API_KEY }),
   {
     trustMode: 'block',

@@ -12,7 +12,7 @@
     "ai:budget": "aifw budget"
   },
   "dependencies": {
-    "ai-execution-firewall": "^1.0.5",
+    "@salimassili/ai-costguard": "^1.1.9",
     "dotenv": "^16.4.0",
     "express": "^4.18.2",
     "openai": "^4.28.0"

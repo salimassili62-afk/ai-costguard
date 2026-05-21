@@ -1,4 +1,4 @@
-import { withCostGuard } from '@salimassili/ai-costguard';
+import { guard } from '@salimassili/ai-costguard';
 
 const fakeClient = {
   chat: {
@@ -8,10 +8,7 @@ const fakeClient = {
   }
 };
 
-const wrapped = withCostGuard(fakeClient, {
-  loopDetection: true,
-  maxTotalCostPerDay: 10
-});
+const wrapped = guard(fakeClient, { budget: 10 });
 
 const res = await wrapped.chat.completions.create({
   model: "gpt-4",

@@ -5,7 +5,7 @@
  * CostGuard enforces a hard daily budget limit.
  */
 
-import { withCostGuard, CostGuardError } from '../src/index';
+import { guard, GuardError } from '../src/index';
 
 // Fake agent that processes large documents
 const fakeAgent = {
@@ -40,11 +40,7 @@ const fakeAgent = {
 };
 
 // Wrap with tight budget limit
-const agent = withCostGuard(fakeAgent, {
-  maxTotalCostPerDay: 1.00,  // Only $1 budget!
-  maxTokensPerRequest: 4000,
-  loopDetection: true
-});
+const agent = guard(fakeAgent, { budget: 1.00 });  // Only $1 budget!
 
 async function main() {
   console.log('=== Budget Breach Demo ===\n');
@@ -61,7 +57,7 @@ async function main() {
         max_tokens: 4000
       });
     } catch (err) {
-      if (err instanceof CostGuardError) {
+      if (err instanceof GuardError) {
         console.log('\n✅ BUDGET CAP TRIGGERED');
         console.log(`   ${err.message}`);
         console.log('\n💰 Hard limit enforced.');

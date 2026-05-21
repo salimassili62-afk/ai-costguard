@@ -1,4 +1,4 @@
-import { withCostGuard } from "../src";
+import { guard } from "../src";
 
 const fakeClient = {
   chat: {
@@ -8,9 +8,7 @@ const fakeClient = {
   }
 };
 
-const guarded = withCostGuard(fakeClient, {
-  maxTotalCostPerDay: 5
-});
+const guarded = guard(fakeClient, { budget: 5 });
 
 async function run() {
   const res = await guarded.chat.completions.create({

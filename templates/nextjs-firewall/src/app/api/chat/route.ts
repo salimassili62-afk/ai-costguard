@@ -5,7 +5,7 @@ import { openai } from '@/lib/openai';
  * AI Chat API Route - Protected by AI Execution Firewall
  * 
  * This route is automatically protected because:
- * 1. The openai client is wrapped with withFirewall()
+ * 1. The openai client is wrapped with guard()
  * 2. Firewall intercepts every request BEFORE it reaches OpenAI
  * 3. If risk is HIGH, request is blocked and money is saved
  */

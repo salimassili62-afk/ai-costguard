@@ -5,7 +5,7 @@
  * Run: npm run example
  */
 
-import { withCostGuard, CostGuardError } from '../src/core/CostGuard.js';
+import { guard, GuardError } from '../src/core/CostGuard.js';
 
 // Simulated OpenAI client (for demo without real API key)
 const fakeOpenAI = {
@@ -23,12 +23,7 @@ const fakeOpenAI = {
 };
 
 // Wrap with cost protection
-const protectedAI = withCostGuard(fakeOpenAI, {
-  maxTokensPerRequest: 4000,
-  maxRequestsPerMinute: 30,
-  maxTotalCostPerDay: 5.00,
-  loopDetection: true,
-});
+const protectedAI = guard(fakeOpenAI, { budget: 5.00 });
 
 async function main() {
   console.log('=== AI CostGuard Demo ===\n');
@@ -55,7 +50,7 @@ async function main() {
       });
       console.log('   ✅ Call', i + 1, 'allowed');
     } catch (e) {
-      if (e instanceof CostGuardError) {
+      if (e instanceof GuardError) {
         console.log('   ❌ BLOCKED:', e.message);
       }
     }
@@ -70,7 +65,7 @@ async function main() {
     });
     console.log('   ✅ Allowed');
   } catch (e) {
-    if (e instanceof CostGuardError) {
+    if (e instanceof GuardError) {
       console.log('   ❌ BLOCKED:', e.message);
     }
   }

@@ -1,19 +1,16 @@
-// AI Execution Firewall - Node.js Example
+// AI CostGuard - Node.js Example
 
-import { withFirewall } from 'ai-execution-firewall';
+import { guard } from '@salimassili/ai-costguard';
 import OpenAI from 'openai';
 
-const openai = withFirewall(
+const openai = guard(
   new OpenAI({ apiKey: process.env.OPENAI_API_KEY }),
-  {
-    trustMode: 'block',
-    dailyBudget: 50,
-    maxCost: 5,
-  }
+  { budget: 50 }
 );
 
-// Use normally
 const response = await openai.chat.completions.create({
   model: 'gpt-4',
   messages: [{ role: 'user', content: 'Hello' }],
 });
+
+console.log(response.choices[0]?.message?.content ?? '');

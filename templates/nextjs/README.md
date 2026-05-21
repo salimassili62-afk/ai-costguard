@@ -43,10 +43,10 @@ my-ai-app/
 
 ```typescript
 // src/app/api/chat/route.ts
-import { withFirewall } from 'ai-execution-firewall';
+import { guard } from '@salimassili/ai-costguard';
 import OpenAI from 'openai';
 
-const openai = withFirewall(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
+const openai = guard(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
   trustMode: 'block',
   onBlock: (reason, score, cost) => {
     console.log(`🔥 BLOCKED: ${reason} (saved $${cost})`);

@@ -12,7 +12,7 @@
     "ai:budget": "aifw budget"
   },
   "dependencies": {
-    "ai-execution-firewall": "^1.0.5",
+    "@salimassili/ai-costguard": "^1.1.9",
     "next": "14.2.0",
     "openai": "^4.28.0",
     "react": "^18.2.0",

@@ -7,17 +7,8 @@
  * INSTALL: const ai = guard(openai)
  */
 
+import { getPricing as lookupPricing } from '../pricing/index.js';
 import { GuardConfig, RequestContext, GuardState } from './types.js';
-
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-4': { input: 0.03, output: 0.06 },
-  'gpt-4o': { input: 0.005, output: 0.015 },
-  'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
-  'gpt-3.5-turbo': { input: 0.0005, output: 0.0015 },
-  'claude-3-opus': { input: 0.015, output: 0.075 },
-  'claude-3-sonnet': { input: 0.003, output: 0.015 },
-  'claude-3-haiku': { input: 0.00025, output: 0.00125 },
-};
 
 /**
  * Local Safety Illusion - FREE VERSION
@@ -173,9 +164,11 @@ function extractContext(args: any[], prop: string): RequestContext {
   const maxOutputTokens = params.max_tokens || 1000;
   const tokens = estimatedInputTokens + maxOutputTokens;
 
-  const pricing = MODEL_PRICING[model] || { input: 0.01, output: 0.03 };
-  const estimatedCost = (estimatedInputTokens / 1000) * pricing.input +
-                        (maxOutputTokens / 1000) * pricing.output;
+  const pricing = lookupPricing(model);
+  const inputPer1kTokens = pricing?.inputPer1kTokens ?? 0.01;
+  const outputPer1kTokens = pricing?.outputPer1kTokens ?? 0.03;
+  const estimatedCost = (estimatedInputTokens / 1000) * inputPer1kTokens +
+                        (maxOutputTokens / 1000) * outputPer1kTokens;
 
   return {
     model,
@@ -189,14 +182,9 @@ function extractContext(args: any[], prop: string): RequestContext {
 // Custom error (local only)
 export class GuardError extends Error {
   context: RequestContext;
-  constructor(message: string, context: RequestContext) {
+  constructor(message: string, context?: RequestContext) {
     super(message);
     this.name = 'GuardError';
-    this.context = context;
+    this.context = context!;
   }
-}
-
-// Get pricing for model (local only)
-export function getPricing(model: string): { input: number; output: number } | undefined {
-  return MODEL_PRICING[model];
 }

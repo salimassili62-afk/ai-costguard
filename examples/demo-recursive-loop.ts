@@ -5,7 +5,7 @@
  * CostGuard detects the loop and kills it before money burns.
  */
 
-import { withCostGuard, CostGuardError } from '../src/index';
+import { guard, GuardError } from '../src/index';
 
 // Fake OpenAI client that simulates an agent stuck in a loop
 const fakeAgent = {
@@ -34,10 +34,7 @@ const fakeAgent = {
 };
 
 // Wrap the agent with CostGuard
-const agent = withCostGuard(fakeAgent, {
-  maxTotalCostPerDay: 10,
-  loopDetection: true
-});
+const agent = guard(fakeAgent, { budget: 10 });
 
 async function main() {
   console.log('=== Recursive Loop Demo ===\n');
@@ -55,7 +52,7 @@ async function main() {
         messages: [{ role: 'user', content: stuckPrompt }]
       });
     } catch (err) {
-      if (err instanceof CostGuardError) {
+      if (err instanceof GuardError) {
         console.log('\n✅ LOOP BLOCKED');
         console.log(`   ${err.message}`);
         console.log('\n💰 Your API budget is safe.');

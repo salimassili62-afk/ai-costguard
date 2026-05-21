@@ -76,11 +76,11 @@ app.listen(3000, () => {
 ```typescript
 // src/routes/chat.ts
 import { Router } from 'express';
-import { withFirewall } from 'ai-execution-firewall';
+import { guard } from '@salimassili/ai-costguard';
 import OpenAI from 'openai';
 
 const router = Router();
-const openai = withFirewall(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
+const openai = guard(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), { budget: 50 });
 
 router.post('/', async (req, res) => {
   const { prompt } = req.body;
@@ -107,10 +107,10 @@ export default router;
 
 ```typescript
 // Override global settings for specific routes
-import { withFirewallHandler } from 'ai-execution-firewall';
+import { middleware } from '@salimassili/ai-costguard';
 
 router.post('/expensive',
-  withFirewallHandler({ trustMode: 'warn', maxCost: 5.0 }),
+  middleware({ budget: 50 }),
   async (req, res) => {
     // This route allows higher costs but warns
     const response = await openai.chat.completions.create({

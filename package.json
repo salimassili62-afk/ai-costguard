@@ -1,21 +1,16 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "1.1.9",
+  "version": "1.2.0",
   "description": "AI Agent Loop & Cost Firewall. Detects infinite loops in autonomous AI agents and kills them before they burn your API budget.",
   "type": "module",
-  "main": "./dist/index.cjs",
+  "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": [
@@ -23,8 +18,9 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
-    "test": "node test/smoke.mjs",
+    "clean": "rimraf dist",
+    "build": "npm run clean && tsc",
+    "test": "node --experimental-vm-modules test/smoke.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -41,6 +37,10 @@
     "node": ">=18"
   },
   "devDependencies": {
+    "rimraf": "^5.0.10",
     "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "ioredis": "^5.10.1"
   }
 }
