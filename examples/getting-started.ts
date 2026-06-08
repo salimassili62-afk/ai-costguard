@@ -1,22 +1,30 @@
 import OpenAI from 'openai';
-import { guard } from '../src';
+import { guard, GuardError } from '@salimassili/ai-costguard';
 
-const client = guard(
-  new OpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '' }),
-  { budget: 10 }
-);
+const openai = guard(new OpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '' }), {
+  budget: 10,
+  scope: { projectId: 'demo' },
+});
 
 async function main() {
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [{ role: 'user', content: 'Write a short welcome message.' }],
-    max_tokens: 120,
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Write a short welcome message.' }],
+      max_tokens: 120,
+    });
 
-  console.log(response.choices[0]?.message?.content ?? '');
+    console.log(response.choices[0]?.message?.content ?? '');
+  } catch (error) {
+    if (error instanceof GuardError) {
+      console.error('Blocked by AI CostGuard:', error.code, error.message);
+      return;
+    }
+    throw error;
+  }
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error(error);
   process.exit(1);
 });

@@ -1,9 +1,0 @@
-{
-  "defaultMode": "block",
-  "riskThreshold": 50,
-  "budgetPerDay": 50,
-  "logging": true,
-  "maxCost": 5,
-  "spikeLimit": 20,
-  "duplicateWindow": 30
-}

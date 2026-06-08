@@ -1,166 +1,275 @@
-/*
- * Usage:
- *
- * import { GuardPro } from '@salimassili/ai-costguard';
- *
- * const guard = new GuardPro({
- *   redisUrl: 'redis://localhost:6379',
- *   budget: 25,
- *   windowSeconds: 86400,
- *   slackWebhook: process.env.SLACK_WEBHOOK,
- *   licenseKey: process.env.COSTGUARD_LICENSE
- * });
- *
- * await guard.checkAndCharge('production', 0.0042);
- * await guard.shutdown();
- *
- * No Redis? Get a free one at https://upstash.com
- */
-
 import { Redis } from 'ioredis';
-import { GuardError } from './GuardFree.js';
-import type { RequestContext } from './types.js';
+import { GuardError } from './GuardCore.js';
+import type { GuardWebhookConfig, RequestContext } from './types.js';
+import { notifyBlockWebhooks } from './webhooks.js';
 
-export interface GuardProConfig {
-  redisUrl: string;
-  budget: number;
-  windowSeconds?: number;
-  slackWebhook?: string;
-  licenseKey?: string;
+/**
+ * Minimal Redis client surface used by GuardPro. Supplying redisClient is useful for tests.
+ */
+export interface GuardProRedisClient {
+  /** Optional connection status exposed by ioredis-compatible clients. */
+  status?: string;
+  /** Registers a connection event handler. */
+  on?(eventName: 'ready' | 'error' | 'close', handler: () => void): unknown;
+  /** Opens the Redis connection when the client is lazy. */
+  connect?(): Promise<unknown>;
+  /** Evaluates the atomic spend increment Lua script. */
+  eval(script: string, keys: number, key: string, amount: string, ttlSeconds: string): Promise<unknown>;
+  /** Reads the current spend value. */
+  get(key: string): Promise<string | null>;
+  /** Deletes a spend key. */
+  del(key: string): Promise<unknown>;
+  /** Closes the connection. */
+  quit?(): Promise<unknown>;
 }
 
+/**
+ * Configuration for Redis-backed budget enforcement.
+ */
+export interface GuardProConfig {
+  /** Redis connection URL. Instances sharing this URL reuse one pooled connection. */
+  redisUrl: string;
+  /** Budget in USD for each project/session window. */
+  budget: number;
+  /** Session TTL in seconds. Defaults to 86400. */
+  windowSeconds?: number;
+  /** Slack webhook URL for budget block notifications. */
+  slackWebhook?: string;
+  /** Discord webhook URL for budget block notifications. */
+  discordWebhook?: string;
+  /** Combined webhook configuration. */
+  webhooks?: GuardWebhookConfig;
+  /** Deprecated compatibility field. GuardPro does not enforce licenses locally. */
+  licenseKey?: string;
+  /** Optional Redis-compatible client. When omitted, GuardPro pools ioredis clients by URL. */
+  redisClient?: GuardProRedisClient;
+}
+
+interface LocalSpendRecord {
+  total: number;
+  expiresAt: number;
+}
+
+interface RedisPoolEntry {
+  client: GuardProRedisClient;
+  refs: number;
+  connected: boolean;
+  connectPromise?: Promise<GuardProRedisClient | null>;
+}
+
+/**
+ * Redis-backed budget guard with local fallback when Redis is unavailable.
+ */
 export class GuardPro {
-  private readonly redis: Redis;
+  private static readonly pools = new Map<string, RedisPoolEntry>();
+
+  private readonly redisUrl: string;
+  private readonly redisClient?: GuardProRedisClient;
+  private readonly poolEntry?: RedisPoolEntry;
   private readonly budget: number;
   private readonly windowSeconds: number;
-  private readonly slackWebhook?: string;
-  private connected: boolean = false;
+  private readonly webhooks?: GuardWebhookConfig;
+  private readonly localSpend = new Map<string, LocalSpendRecord>();
+  private directRedisFailed = false;
+  private directRedisReady = false;
 
+  /**
+   * Creates a GuardPro instance and reuses a pooled Redis connection for the same URL.
+   */
   constructor(config: GuardProConfig) {
-    if (config.licenseKey && !validateLicense(config.licenseKey)) {
-      throw new GuardError(
-        'Invalid CostGuard Pro license key. ' +
-        'Your key must be at least 16 characters and pass checksum validation.'
-      );
+    this.redisUrl = config.redisUrl;
+    this.budget = config.budget;
+    this.windowSeconds = config.windowSeconds ?? 86_400;
+    this.webhooks = {
+      ...config.webhooks,
+      slack: config.webhooks?.slack ?? config.slackWebhook,
+      discord: config.webhooks?.discord ?? config.discordWebhook,
+    };
+
+    if (config.redisClient) {
+      this.redisClient = config.redisClient;
+      this.attachConnectionEvents(config.redisClient);
+      return;
     }
 
+    if (config.redisUrl.trim()) {
+      this.poolEntry = GuardPro.getPoolEntry(config.redisUrl);
+      this.redisClient = this.poolEntry.client;
+    }
+  }
+
+  /**
+   * Atomically charges estimated spend for a project and throws GuardError when budget is exceeded.
+   */
+  async checkAndCharge(projectId: string, estimatedCost: number): Promise<void> {
+    const key = this.getSpendKey(projectId);
+    const redis = await this.getUsableRedis();
+    const total = redis
+      ? await this.incrementRedisOrFallback(redis, key, projectId, estimatedCost)
+      : this.incrementLocal(projectId, estimatedCost);
+
+    if (total > this.budget) {
+      const context = this.createContext(projectId, estimatedCost);
+      const reason =
+        `Project "${projectId}" exceeded budget. ` +
+        `Spend: $${total.toFixed(6)} / Budget: $${this.budget.toFixed(6)}`;
+
+      await notifyBlockWebhooks(this.webhooks, { reason, context });
+      throw new GuardError(reason, context, 'BUDGET_EXCEEDED');
+    }
+  }
+
+  /**
+   * Returns current spend for a project from Redis when available, otherwise from local fallback state.
+   */
+  async getSpend(projectId: string): Promise<number> {
+    const redis = await this.getUsableRedis();
+    if (redis) {
+      try {
+        const value = await redis.get(this.getSpendKey(projectId));
+        return value ? Number(value) : 0;
+      } catch {
+        this.markDisconnected();
+      }
+    }
+
+    return this.getLocal(projectId).total;
+  }
+
+  /**
+   * Resets spend for a project in Redis when available and always clears local fallback state.
+   */
+  async resetSpend(projectId: string): Promise<void> {
+    this.localSpend.delete(projectId);
+
+    const redis = await this.getUsableRedis();
+    if (!redis) return;
+
     try {
-      this.redis = new Redis(config.redisUrl, {
+      await redis.del(this.getSpendKey(projectId));
+    } catch {
+      this.markDisconnected();
+    }
+  }
+
+  /**
+   * Returns true when the pooled or supplied Redis client is currently connected.
+   */
+  isConnected(): boolean {
+    if (this.poolEntry) return this.poolEntry.connected;
+    return !this.directRedisFailed && (this.redisClient?.status === 'ready' || this.directRedisReady);
+  }
+
+  /**
+   * Releases this instance's pooled Redis reference and closes the connection when unused.
+   */
+  async shutdown(): Promise<void> {
+    if (this.poolEntry) {
+      this.poolEntry.refs -= 1;
+      if (this.poolEntry.refs <= 0) {
+        GuardPro.pools.delete(this.redisUrl);
+        await this.safeQuit(this.poolEntry.client);
+      }
+      return;
+    }
+
+    if (this.redisClient) {
+      await this.safeQuit(this.redisClient);
+    }
+  }
+
+  private static getPoolEntry(redisUrl: string): RedisPoolEntry {
+    const existing = GuardPro.pools.get(redisUrl);
+    if (existing) {
+      existing.refs += 1;
+      return existing;
+    }
+
+    const entry: RedisPoolEntry = {
+      client: new Redis(redisUrl, {
         lazyConnect: true,
         enableOfflineQueue: false,
         retryStrategy: () => null,
-      });
+      }),
+      refs: 1,
+      connected: false,
+    };
 
-      this.redis.on('ready', () => {
-        this.connected = true;
-      });
+    entry.client.on?.('ready', () => {
+      entry.connected = true;
+    });
+    entry.client.on?.('error', () => {
+      entry.connected = false;
+    });
+    entry.client.on?.('close', () => {
+      entry.connected = false;
+    });
 
-      this.redis.on('error', () => {
-        this.connected = false;
-      });
-
-      this.redis.on('close', () => {
-        this.connected = false;
-      });
-
-      this.redis.connect().then(() => {
-        this.connected = true;
-      }).catch(() => {
-        throw new GuardError(
-          'GuardPro requires a Redis connection. ' +
-          'Pass a valid redisUrl in GuardProConfig. ' +
-          'Free option: create an Upstash account at https://upstash.com ' +
-          'and paste your Redis URL.'
-        );
-      });
-
-    } catch (error) {
-      if (error instanceof GuardError) throw error;
-      throw new GuardError(
-        'GuardPro failed to initialize Redis. ' +
-        'Pass a valid redisUrl in GuardProConfig. ' +
-        'Free option: create an Upstash account at https://upstash.com ' +
-        'and paste your Redis URL.'
-      );
-    }
-
-    this.budget = config.budget;
-    this.windowSeconds = config.windowSeconds ?? 86400;
-    this.slackWebhook = config.slackWebhook;
+    GuardPro.pools.set(redisUrl, entry);
+    return entry;
   }
 
-  async checkAndCharge(projectId: string, estimatedCost: number): Promise<void> {
-    if (!this.connected) {
-      throw new GuardError(
-        'GuardPro lost Redis connection. ' +
-        'Spending is blocked until connection is restored.'
-      );
+  private attachConnectionEvents(client: GuardProRedisClient): void {
+    client.on?.('ready', () => {
+      this.directRedisReady = true;
+      this.directRedisFailed = false;
+    });
+    client.on?.('error', () => {
+      this.directRedisReady = false;
+      this.directRedisFailed = true;
+    });
+    client.on?.('close', () => {
+      this.directRedisReady = false;
+    });
+  }
+
+  private async getUsableRedis(): Promise<GuardProRedisClient | null> {
+    const client = this.redisClient;
+    if (!client) return null;
+    if (!this.poolEntry && this.directRedisFailed) return null;
+    if (client.status === 'ready') return client;
+
+    if (this.poolEntry) {
+      if (this.poolEntry.connected) return client;
+      this.poolEntry.connectPromise ??= this.connect(client);
+      return this.poolEntry.connectPromise;
     }
 
-    let total: number;
+    return this.connect(client);
+  }
 
+  private async connect(client: GuardProRedisClient): Promise<GuardProRedisClient | null> {
     try {
-      const key = this.getSpendKey(projectId);
-      total = await this.incrementSpend(key, estimatedCost);
-    } catch (error) {
-      if (error instanceof GuardError) throw error;
-      throw new GuardError(
-        'GuardPro lost Redis connection. ' +
-        'Spending is blocked until connection is restored.'
-      );
-    }
-
-    if (total > this.budget) {
-      if (this.slackWebhook) {
-        try {
-          await this.sendBudgetAlert(projectId, total);
-        } catch {
-          console.error('[CostGuard] Slack webhook failed — budget still enforced.');
-        }
+      await client.connect?.();
+      if (this.poolEntry) {
+        this.poolEntry.connected = client.status === undefined || client.status === 'ready';
+        this.poolEntry.connectPromise = undefined;
+      } else {
+        this.directRedisFailed = false;
+        this.directRedisReady = true;
       }
-
-      throw new GuardError(
-        `Project "${projectId}" exceeded budget. ` +
-        `Spend: $${total.toFixed(6)} / Budget: $${this.budget.toFixed(6)}`,
-        this.createContext(projectId, estimatedCost)
-      );
-    }
-  }
-
-  async getSpend(projectId: string): Promise<number> {
-    if (!this.connected) return 0;
-    try {
-      const value = await this.redis.get(this.getSpendKey(projectId));
-      return value ? Number(value) : 0;
+      return client;
     } catch {
-      return 0;
+      this.markDisconnected();
+      return null;
     }
   }
 
-  async resetSpend(projectId: string): Promise<void> {
-    if (!this.connected) return;
+  private async incrementRedisOrFallback(
+    redis: GuardProRedisClient,
+    key: string,
+    projectId: string,
+    estimatedCost: number
+  ): Promise<number> {
     try {
-      await this.redis.del(this.getSpendKey(projectId));
+      return await this.incrementRedis(redis, key, estimatedCost);
     } catch {
-      // silent — reset is best-effort
+      this.markDisconnected();
+      return this.incrementLocal(projectId, estimatedCost);
     }
   }
 
-  isConnected(): boolean {
-    return this.connected;
-  }
-
-  async shutdown(): Promise<void> {
-    try {
-      await this.redis.quit();
-    } catch {
-      // ignore close errors
-    } finally {
-      this.connected = false;
-    }
-  }
-
-  private async incrementSpend(key: string, estimatedCost: number): Promise<number> {
+  private async incrementRedis(redis: GuardProRedisClient, key: string, estimatedCost: number): Promise<number> {
     const script = `
       local total = redis.call("INCRBYFLOAT", KEYS[1], ARGV[1])
       local ttl = redis.call("TTL", KEYS[1])
@@ -170,30 +279,48 @@ export class GuardPro {
       return total
     `;
 
-    const total = await this.redis.eval(
-      script,
-      1,
-      key,
-      estimatedCost.toString(),
-      this.windowSeconds.toString()
-    );
-
+    const total = await redis.eval(script, 1, key, estimatedCost.toString(), this.windowSeconds.toString());
     return Number(total);
   }
 
-  private async sendBudgetAlert(projectId: string, currentSpend: number): Promise<void> {
-    if (!this.slackWebhook) return;
+  private incrementLocal(projectId: string, estimatedCost: number): number {
+    const record = this.getLocal(projectId);
+    record.total += estimatedCost;
+    this.localSpend.set(projectId, record);
+    return record.total;
+  }
 
-    const response = await fetch(this.slackWebhook, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        text: `[CostGuard] 🚨 Project "${projectId}" exceeded budget.\nSpend: $${currentSpend.toFixed(6)} / Budget: $${this.budget.toFixed(6)}`
-      })
-    });
+  private getLocal(projectId: string): LocalSpendRecord {
+    const now = Date.now();
+    const existing = this.localSpend.get(projectId);
 
-    if (!response.ok) {
-      throw new Error(`Slack webhook responded with status ${response.status}`);
+    if (existing && existing.expiresAt > now) {
+      return existing;
+    }
+
+    const fresh = {
+      total: 0,
+      expiresAt: now + this.windowSeconds * 1000,
+    };
+    this.localSpend.set(projectId, fresh);
+    return fresh;
+  }
+
+  private markDisconnected(): void {
+    if (this.poolEntry) {
+      this.poolEntry.connected = false;
+      this.poolEntry.connectPromise = undefined;
+    } else {
+      this.directRedisFailed = true;
+      this.directRedisReady = false;
+    }
+  }
+
+  private async safeQuit(client: GuardProRedisClient): Promise<void> {
+    try {
+      await client.quit?.();
+    } catch {
+      // Best-effort shutdown only.
     }
   }
 
@@ -205,20 +332,31 @@ export class GuardPro {
     return {
       model: 'unknown',
       tokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
       estimatedCost,
       timestamp: Date.now(),
-      prompt: `project:${projectId}`
+      prompt: `project:${projectId}`,
     };
   }
 }
 
+/**
+ * Deprecated compatibility helper.
+ *
+ * This is a format sanity check only. It is not license enforcement and should
+ * not be used for commercial access control.
+ */
 export function validateLicense(key: string): boolean {
-  if (typeof key !== 'string' || key.length < 16) return false;
-  const checksum = Array.from(key).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return checksum % 7 === 0;
+  return typeof key === 'string' && key.trim().length >= 16;
 }
 
+/**
+ * Creates GuardPro.
+ *
+ * The return type remains nullable for backwards compatibility with older
+ * callers, but local license rejection has intentionally been removed.
+ */
 export function getProGuard(config: GuardProConfig): GuardPro | null {
-  if (config.licenseKey && !validateLicense(config.licenseKey)) return null;
   return new GuardPro(config);
 }

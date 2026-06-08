@@ -1,18 +1,17 @@
 {
   "name": "express-ai-firewall",
   "version": "1.0.0",
-  "description": "Express server with AI Execution Firewall protection",
+  "description": "Express server with AI CostGuard protection",
+  "type": "module",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "ts-node src/server.ts",
-    "ai:check": "aifw check",
-    "ai:dashboard": "aifw dashboard",
-    "ai:budget": "aifw budget"
+    "dev": "node --loader ts-node/esm src/server.ts",
+    "ai:check": "aifw check"
   },
   "dependencies": {
-    "@salimassili/ai-costguard": "^1.1.9",
+    "@salimassili/ai-costguard": "^2.0.0",
     "dotenv": "^16.4.0",
     "express": "^4.18.2",
     "openai": "^4.28.0"

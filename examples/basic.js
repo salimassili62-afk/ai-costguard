@@ -1,77 +1,47 @@
-/**
- * Basic Example - AI CostGuard MVP
- * 
- * Shows how to wrap an OpenAI client with cost protection.
- * Run: npm run example
- */
+import { guard, GuardError } from '@salimassili/ai-costguard';
 
-import { guard, GuardError } from '../src/core/CostGuard.js';
-
-// Simulated OpenAI client (for demo without real API key)
 const fakeOpenAI = {
   chat: {
     completions: {
-      create: async ({ model, messages }) => {
-        const content = messages[0].content;
-        return {
-          choices: [{ message: { content: `Reply to: ${content}` } }],
-          usage: { total_tokens: 100 },
-        };
-      },
+      create: async ({ messages }) => ({
+        choices: [{ message: { content: `Reply to: ${messages[0].content}` } }],
+        usage: { prompt_tokens: 12, completion_tokens: 18 },
+      }),
     },
   },
 };
 
-// Wrap with cost protection
-const protectedAI = guard(fakeOpenAI, { budget: 5.00 });
+const openai = guard(fakeOpenAI, { budget: 1 });
 
 async function main() {
-  console.log('=== AI CostGuard Demo ===\n');
+  console.log('AI CostGuard basic example');
 
-  // Example 1: Normal call (allowed)
-  console.log('1. Normal call...');
-  try {
-    const r1 = await protectedAI.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: 'Hello AI' }],
-    });
-    console.log('   ✅ Allowed:', r1.choices[0].message.content);
-  } catch (e) {
-    console.log('   ❌ Blocked:', e.message);
-  }
+  const first = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: 'Hello' }],
+    max_tokens: 50,
+  });
+  console.log(first.choices[0].message.content);
 
-  // Example 2: Loop detection (blocked)
-  console.log('\n2. Simulating loop (same prompt 3x)...');
-  for (let i = 0; i < 3; i++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await protectedAI.chat.completions.create({
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: 'Same prompt' }],
+      await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Repeat this same request' }],
+        max_tokens: 50,
       });
-      console.log('   ✅ Call', i + 1, 'allowed');
-    } catch (e) {
-      if (e instanceof GuardError) {
-        console.log('   ❌ BLOCKED:', e.message);
+      console.log(`loop attempt ${attempt}: allowed`);
+    } catch (error) {
+      if (error instanceof GuardError) {
+        console.log(`loop attempt ${attempt}: blocked with ${error.code}`);
+        return;
       }
+      throw error;
     }
   }
-
-  // Example 3: Excessive tokens (blocked)
-  console.log('\n3. Excessive tokens (10,000)...');
-  try {
-    await protectedAI.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: 'X'.repeat(5000) }],
-    });
-    console.log('   ✅ Allowed');
-  } catch (e) {
-    if (e instanceof GuardError) {
-      console.log('   ❌ BLOCKED:', e.message);
-    }
-  }
-
-  console.log('\n=== Demo Complete ===');
-  console.log('In production, real API calls would be intercepted and blocked.');
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

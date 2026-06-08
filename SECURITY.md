@@ -2,41 +2,46 @@
 
 ## Supported Versions
 
-Only the latest version of AI Execution Firewall is supported with security updates.
+Only the latest published version of `@salimassili/ai-costguard` receives security fixes.
 
-## Reporting a Vulnerability
+## Reporting A Vulnerability
 
-If you discover a security vulnerability, please report it privately:
+Please report vulnerabilities privately to the maintainer. Include:
 
-1. Send an email to the security team
-2. Do not disclose the vulnerability publicly until it has been fixed
-3. Include as much detail as possible to reproduce the issue
+- affected version
+- reproduction steps
+- expected and actual behavior
+- impact assessment
 
-## Security Features
+Do not publish exploit details until a fix is available.
 
-### Authentication
-- Optional API key authentication for proxy mode via `x-firewall-api-key` header
-- API keys stored in local config file (`~/.aifw/config.json`)
+## Actual Security Model
 
-### Rate Limiting
-- Per-IP rate limiting (configurable, default: 60 requests/minute)
-- In-memory implementation for performance
+AI CostGuard is an in-process pre-call guard. It does not run a proxy server, authenticate API keys, terminate TLS, store provider API keys, or provide a hosted control plane.
 
-### Data Privacy
-- **Prompt Storage**: Full prompt text is stored in plaintext in `~/.aifw/history.jsonl`
-- **Hash Storage**: SHA-256 hashes stored for duplicate detection
-- **API Keys**: Not logged, only stored in config file
-- **Local Only**: All data stored locally on user's machine
-- **No Telemetry**: No external network calls
+The root package:
 
-### Transport Security
-- Proxy mode forwards requests to upstream APIs (OpenAI, Anthropic)
-- Does not modify TLS/HTTPS connections
-- Relies on upstream API security for data in transit
+- keeps prompt history in process memory for loop/retry detection
+- sends no telemetry
+- makes no network calls except optional Slack/Discord block webhooks configured by the application
+- does not persist prompts to disk unless the application explicitly enables `eventLogPath` with `eventLogPrompt: 'preview'`
+- does not mutate provider API keys
 
-## Best Practices
+The optional Pro helper at `@salimassili/ai-costguard/pro` can connect to Redis when configured. Redis URL handling and network access are the host application's responsibility.
 
-1. **API Key Management**: Never commit API keys to version control
-2. **Proxy Authentication**: Enable API key authentication in production deployments
-3. **Log Retention**: Configure appropriate log retention based on your compliance requirements
-4. **Network Isolation**: Deploy the proxy in a trusted network environment
+The local dashboard command reads an application-selected JSONL file and binds to `127.0.0.1` by default. It is not a hosted analytics product.
+
+## Data Handling
+
+Prompts used for behavior analysis are retained in process memory until evicted by `maxHistory` or `historyTtlMs`. Do not enable behavior analysis for data you are not allowed to retain even briefly in memory.
+
+Webhook payloads include the block reason, model, and estimated cost. They do not include the full prompt by default.
+
+JSONL event logs include model, method, scope key, estimated cost, event type, and block code. Prompt text is excluded by default. Prompt previews are written only when `eventLogPrompt: 'preview'` is configured.
+
+## Known Limitations
+
+- Cost checks are estimates, not provider billing records.
+- Loop and retry detection are heuristics and can have false positives or false negatives.
+- `licenseKey` and `validateLicense()` are compatibility helpers only. They do not enforce commercial access control.
+- The free guard is process-local and does not protect other processes unless the application shares state externally.

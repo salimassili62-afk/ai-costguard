@@ -1,27 +1,35 @@
-/**
- * Example: Express middleware
- *
- * Protect all AI calls in your Express app.
- */
-
 import express from 'express';
-import { middleware } from '../src/index';
+import { GuardError, middleware } from '@salimassili/ai-costguard';
 
 const app = express();
 app.use(express.json());
+app.use(middleware({ budget: 2 }));
 
-// Apply cost guard to all routes
-app.use(middleware({ budget: 10.00 }));
+app.post('/chat', async (req, res, next) => {
+  try {
+    const guard = (req as any).localSafety;
+    guard.check({
+      model: 'gpt-4o-mini',
+      tokens: 500,
+      inputTokens: 100,
+      outputTokens: 400,
+      estimatedCost: 0.0003,
+      timestamp: Date.now(),
+      prompt: String(req.body?.prompt ?? ''),
+      scope: { projectId: 'express-example' },
+      scopeKey: 'project:express-example|user:*|session:*',
+    });
 
-app.post('/chat', async (req, res) => {
-  const { message } = req.body;
-
-  // Simulated AI call
-  const response = { reply: `Echo: ${message}` };
-  res.json(response);
+    res.json({ ok: true, reply: `Echo: ${req.body?.prompt ?? ''}` });
+  } catch (error) {
+    if (error instanceof GuardError) {
+      res.status(403).json({ error: error.code, reason: error.message, context: error.context });
+      return;
+    }
+    next(error);
+  }
 });
 
 app.listen(3000, () => {
-  console.log('Server running on port 3000');
-  console.log('All AI calls are cost-protected');
+  console.log('AI CostGuard Express example listening on http://localhost:3000');
 });

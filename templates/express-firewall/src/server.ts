@@ -6,7 +6,7 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
-import { guard, middleware, GuardError } from '@salimassili/ai-costguard';
+import { guard, middleware, GuardError, getPricing } from '@salimassili/ai-costguard';
 import OpenAI from 'openai';
 
 dotenv.config();
@@ -19,7 +19,10 @@ app.use(middleware({ budget: 50 }));
 
 const openai = guard(
   new OpenAI({ apiKey: process.env.OPENAI_API_KEY }),
-  { budget: 50 }
+  {
+    budget: 50,
+    scope: { projectId: 'express-template' },
+  }
 );
 
 app.get('/health', (_req: Request, res: Response) => {
@@ -50,10 +53,11 @@ app.post('/api/chat', async (req: Request, res: Response) => {
       model,
       usage: completion.usage,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof GuardError) {
       return res.status(403).json({
         error: 'Blocked by AI CostGuard',
+        code: error.code,
         reason: error.message,
         context: error.context,
       });
@@ -67,17 +71,24 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 app.post('/api/estimate', async (req: Request, res: Response) => {
   const { prompt, model = 'gpt-4' } = req.body;
 
-  const estimatedTokens = Math.ceil(prompt.length / 4) + 1000;
-  const inputCost = (estimatedTokens / 1000) * 0.03;
-  const outputCost = (1000 / 1000) * 0.06;
-  const totalCost = inputCost + outputCost;
+  const pricing = getPricing(model);
+  if (!pricing) {
+    return res.status(400).json({
+      error: 'Unknown model pricing',
+      message: 'Choose a known model or configure pricingOverrides in your application.',
+    });
+  }
+
+  const inputTokens = Math.ceil(String(prompt ?? '').length / 4);
+  const outputTokens = 1000;
+  const totalCost = (inputTokens / 1000) * pricing.inputPer1kTokens + (outputTokens / 1000) * pricing.outputPer1kTokens;
 
   res.json({
     prompt,
     model,
-    estimatedTokens,
+    inputTokens,
+    outputTokens,
     estimatedCost: Math.round(totalCost * 10000) / 10000,
-    risk: totalCost > 0.5 ? 'MEDIUM' : 'LOW',
   });
 });
 

@@ -1,27 +1,53 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "1.2.0",
-  "description": "AI Agent Loop & Cost Firewall. Detects infinite loops in autonomous AI agents and kills them before they burn your API budget.",
+  "version": "2.0.0",
+  "description": "Local-first runtime safety layer for AI agents that blocks runaway costs, loops, retries, and budget overruns before API calls execute.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "bin": {
+    "aifw": "./dist/cli.js",
+    "ai-costguard": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./pro": {
+      "types": "./dist/pro.d.ts",
+      "import": "./dist/pro.js",
+      "default": "./dist/pro.js"
+    },
+    "./pricing": {
+      "types": "./dist/pricing/index.d.ts",
+      "import": "./dist/pricing/index.js",
+      "default": "./dist/pricing/index.js"
     }
   },
   "files": [
     "dist",
-    "README.md"
+    "docs/DASHBOARD.md",
+    "docs/INTEGRATIONS.md",
+    "docs/BENCHMARKS.md",
+    "examples/integrations",
+    "benchmarks/run.mjs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "clean": "rimraf dist",
     "build": "npm run clean && tsc",
-    "test": "node --experimental-vm-modules test/smoke.mjs",
-    "prepublishOnly": "npm run build"
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test --experimental-test-coverage --test-coverage-include=dist/**/*.js --test-coverage-lines=80 --test-coverage-functions=80 --test-coverage-branches=70 \"test/**/*.test.mjs\"",
+    "smoke": "node test/smoke-examples.mjs",
+    "benchmark": "node benchmarks/run.mjs",
+    "preflight": "node scripts/preflight.js",
+    "prepublishOnly": "npm run preflight"
   },
   "keywords": [
     "ai",
@@ -29,7 +55,9 @@
     "llm",
     "cost-control",
     "agent",
-    "firewall"
+    "runtime-safety",
+    "ai-agents",
+    "budget-guard"
   ],
   "author": "Salim Assili",
   "license": "MIT",
@@ -40,7 +68,7 @@
     "rimraf": "^5.0.10",
     "typescript": "^5.3.3"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "ioredis": "^5.10.1"
   }
 }

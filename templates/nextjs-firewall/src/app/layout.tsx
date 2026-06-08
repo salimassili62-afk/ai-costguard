@@ -6,7 +6,7 @@ const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'AI Chat with Cost Protection',
-  description: 'Next.js app protected by AI Execution Firewall',
+  description: 'Next.js app protected by AI CostGuard',
 };
 
 export default function RootLayout({

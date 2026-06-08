@@ -8,42 +8,39 @@ export default function Home() {
   const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<number | null>(null);
-  const [risk, setRisk] = useState<string | null>(null);
+  const [blockCode, setBlockCode] = useState<string | null>(null);
+  const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setLoading(true);
     setError(null);
     setResponse('');
-    setSaved(null);
-    setRisk(null);
+    setBlockCode(null);
+    setEstimatedCost(null);
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        if (res.status === 403 && data.saved) {
-          // Firewall blocked the request
-          setError(data.reason || 'Blocked by AI Firewall');
-          setSaved(data.saved);
-          setRisk(data.dangerScore > 70 ? 'HIGH' : 'MEDIUM');
+        if (res.status === 403) {
+          setError(data.reason || 'Blocked by AI CostGuard');
+          setBlockCode(data.code || 'BLOCKED');
+          setEstimatedCost(data.context?.estimatedCost ?? null);
         } else {
           setError(data.error || 'Request failed');
         }
       } else {
         setResponse(data.text);
       }
-    } catch (err: any) {
-      setError('Network error: ' + err.message);
+    } catch (err) {
+      setError(`Network error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -52,58 +49,39 @@ export default function Home() {
   return (
     <main className={styles.main}>
       <div className={styles.container}>
-        <h1 className={styles.title}>
-          🤖 AI Chat with Cost Protection
-        </h1>
-        
-        <p className={styles.subtitle}>
-          Powered by AI Execution Firewall
-        </p>
+        <h1 className={styles.title}>AI Chat with Cost Protection</h1>
+        <p className={styles.subtitle}>Powered by AI CostGuard</p>
 
         <div className={styles.info}>
           <div className={styles.badge}>Protected</div>
-          <div className={styles.badge}>$50 Daily Budget</div>
-          <div className={styles.badge}>Risk Threshold: 50</div>
+          <div className={styles.badge}>$50 process budget</div>
+          <div className={styles.badge}>Local-first</div>
         </div>
 
         <form onSubmit={handleSubmit} className={styles.form}>
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Enter your prompt here... (Try sending the same prompt multiple times to see loop detection)"
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="Enter your prompt. Send the same prompt three times to see loop detection."
             className={styles.textarea}
             rows={4}
           />
-          
-          <button
-            type="submit"
-            disabled={loading || !prompt.trim()}
-            className={styles.button}
-          >
+
+          <button type="submit" disabled={loading || !prompt.trim()} className={styles.button}>
             {loading ? 'Generating...' : 'Generate Response'}
           </button>
         </form>
 
-        {saved !== null && (
-          <div className={styles.savings}>
-            <div className={styles.savedBadge}>
-              💰 SAVED ${saved.toFixed(4)}
-            </div>
-            <p className={styles.savedText}>
-              Request blocked by AI Firewall
-            </p>
-          </div>
-        )}
-
-        {risk && (
-          <div className={`${styles.riskBadge} ${styles[risk.toLowerCase()]}`}>
-            ⚠️ Risk Level: {risk}
+        {blockCode && (
+          <div className={`${styles.riskBadge} ${styles.medium}`}>
+            Block code: {blockCode}
+            {estimatedCost !== null ? `, estimated cost $${estimatedCost.toFixed(6)}` : ''}
           </div>
         )}
 
         {error && (
           <div className={styles.error}>
-            <strong>🔥 Blocked:</strong> {error}
+            <strong>Blocked:</strong> {error}
           </div>
         )}
 
@@ -115,10 +93,7 @@ export default function Home() {
         )}
 
         <div className={styles.footer}>
-          <p>
-            This app is protected by AI Execution Firewall.
-            High-risk or duplicate requests are automatically blocked.
-          </p>
+          <p>Budget overruns and repeated prompts are blocked before the provider call.</p>
         </div>
       </div>
     </main>

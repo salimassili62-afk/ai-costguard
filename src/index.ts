@@ -1,6 +1,15 @@
-export { guard, GuardError, middleware } from './core/GuardFree.js';
-export { GuardPro, validateLicense, getProGuard } from './core/GuardPro.js';
-export type { GuardProConfig } from './core/GuardPro.js';
+export { guard, guardFunction, GuardError, middleware } from './core/GuardFree.js';
+export type { GuardedClient, GuardEventControls } from './core/GuardFree.js';
 export { getPricing, registerPricing, listPricing } from './pricing/index.js';
 export type { ModelPricing } from './pricing/index.js';
-export type { GuardConfig } from './core/types.js';
+export type {
+  GuardConfig,
+  GuardErrorCode,
+  GuardEvent,
+  GuardEventHandler,
+  GuardEventName,
+  GuardScope,
+  GuardState,
+  GuardWebhookConfig,
+  RequestContext,
+} from './core/types.js';

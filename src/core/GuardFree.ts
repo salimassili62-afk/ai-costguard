@@ -1,190 +1,180 @@
-/**
- * GuardFree.ts - LOCAL ILLUSION OF SAFETY (FREE VERSION)
- * 
- * Each process thinks it is safe.
- * Single-process protection only.
- * 
- * INSTALL: const ai = guard(openai)
- */
-
-import { getPricing as lookupPricing } from '../pricing/index.js';
-import { GuardConfig, RequestContext, GuardState } from './types.js';
+import { GuardCore, GuardError, createGuardState } from './GuardCore.js';
+import type { GuardConfig, GuardEventHandler, GuardEventName, GuardState, RequestContext } from './types.js';
 
 /**
- * Local Safety Illusion - FREE VERSION
- * 
- * Each process thinks it is safe.
- * Single-process protection only.
- * 
- * WARNING: Process-local only. Not production safe.
+ * Event controls added to a guarded client proxy.
  */
-export function guard(client: any, config: GuardConfig, sharedState?: GuardState) {
-  const defaults: GuardConfig = {
-    budget: 10
-  };
-
-  const guardConfig = { ...defaults, ...config };
-  
-  // Process-local state only - each process thinks it's safe
-  const state: GuardState = sharedState || {
-    requestCount: 0,
-    totalCost: 0,
-    lastRequestTime: 0,
-    blockedCount: 0,
-  };
-
-  return new Proxy(client, {
-    get(target, prop) {
-      const value = target[prop as string];
-
-      if (typeof value === 'function') {
-        return (...args: any[]) => {
-          const ctx = extractContext(args, prop as string);
-
-          // Local budget check - each process thinks it's safe
-          if (state.totalCost + ctx.estimatedCost > guardConfig.budget) {
-            const saved = guardConfig.budget - state.totalCost;
-            state.blockedCount++;
-            
-            console.error(`🚨 LOCAL SAFETY: Budget exceeded → saved $${saved.toFixed(2)}`);
-            throw new GuardError(`Budget exceeded`, ctx);
-          }
-
-          // Local loop detection - basic hash only
-          if (detectLocalLoop(ctx.prompt, state)) {
-            const saved = ctx.estimatedCost * 20;
-            state.blockedCount++;
-            
-            console.error(`🚨 LOCAL SAFETY: Loop detected → saved $${saved.toFixed(2)}`);
-            throw new GuardError(`Loop detected`, ctx);
-          }
-
-          // Local retry detection - basic keyword only
-          if (detectLocalRetry(ctx.prompt, state)) {
-            const saved = ctx.estimatedCost * 10;
-            state.blockedCount++;
-            
-            console.error(`🚨 LOCAL SAFETY: Retry detected → saved $${saved.toFixed(2)}`);
-            throw new GuardError(`Retry detected`, ctx);
-          }
-
-          // Update local state only
-          state.requestCount++;
-          state.totalCost += ctx.estimatedCost;
-          state.lastRequestTime = Date.now();
-
-          return value.apply(target, args);
-        };
-      }
-
-      // Handle nested objects (local only)
-      if (value && typeof value === 'object') {
-        return guard(value, guardConfig, state);
-      }
-
-      return value;
-    },
-  });
+export interface GuardEventControls {
+  /** Subscribes to block, allow, or cost events. */
+  on(eventName: GuardEventName, handler: GuardEventHandler): () => void;
+  /** Removes an event handler. */
+  off(eventName: GuardEventName, handler: GuardEventHandler): void;
+  /** Returns the mutable process-local guard state. */
+  getGuardState(): GuardState;
 }
 
 /**
- * Express middleware - Local safety for web apps
+ * Client type returned by guard().
  */
-export function middleware(config: GuardConfig) {
-  const guardConfig = { ...config, budget: config.budget || 10 };
+export type GuardedClient<TClient extends object> = TClient & GuardEventControls;
 
-  return (req: any, res: any, next: any) => {
-    req.localSafety = {
-      state: {
-        requestCount: 0,
-        totalCost: 0,
-        lastRequestTime: 0,
-        blockedCount: 0,
+/**
+ * Wraps an OpenAI-like client with process-local cost, loop, and retry protection.
+ */
+export function guard<TClient extends object>(
+  client: TClient,
+  config: GuardConfig = {},
+  sharedState: GuardState = createGuardState()
+): GuardedClient<TClient> {
+  const core = new GuardCore(config, sharedState);
+  const proxies = new WeakMap<object, object>();
+
+  const wrap = <TObject extends object>(target: TObject, path: string[] = []): TObject & GuardEventControls => {
+    const cached = proxies.get(target);
+    if (cached) return cached as TObject & GuardEventControls;
+
+    const proxy = new Proxy(target, {
+      get(currentTarget, prop, receiver) {
+        if (prop === 'on') return core.on.bind(core);
+        if (prop === 'off') return core.off.bind(core);
+        if (prop === 'getGuardState') return core.getState.bind(core);
+
+        const value = Reflect.get(currentTarget, prop, receiver) as unknown;
+        const nextPath = typeof prop === 'string' ? [...path, prop] : path;
+
+        if (typeof value === 'function') {
+          return (...args: readonly unknown[]) => {
+            const methodPath = nextPath.join('.');
+            if (!core.shouldGuardMethod(methodPath)) {
+              return Reflect.apply(value, currentTarget, args);
+            }
+
+            const context = core.extractContext(args, methodPath);
+            core.check(context);
+            const result = Reflect.apply(value, currentTarget, stripGuardMetadata(args));
+
+            if (isPromiseLike(result)) {
+              return result.then((resolved: unknown) => {
+                core.recordActualUsage(context, resolved);
+                return resolved;
+              });
+            }
+
+            core.recordActualUsage(context, result);
+            return result;
+          };
+        }
+
+        if (isObject(value)) {
+          return wrap(value, nextPath);
+        }
+
+        return value;
       },
-      check: (ctx: RequestContext) => {
-        if (req.localSafety.state.totalCost + ctx.estimatedCost > guardConfig.budget) {
-          throw new GuardError('Budget exceeded', ctx);
-        }
-        if (detectLocalLoop(ctx.prompt, req.localSafety.state)) {
-          throw new GuardError('Loop detected', ctx);
-        }
-        if (detectLocalRetry(ctx.prompt, req.localSafety.state)) {
-          throw new GuardError('Retry detected', ctx);
-        }
-        req.localSafety.state.requestCount++;
-        req.localSafety.state.totalCost += ctx.estimatedCost;
-      }
+    });
+
+    proxies.set(target, proxy);
+    return proxy as TObject & GuardEventControls;
+  };
+
+  return wrap(client);
+}
+
+/**
+ * Wraps a standalone AI function with the same guard behavior as guard().
+ *
+ * The first function argument should be an OpenAI-like request object containing
+ * model, messages/prompt/input, and max_tokens/maxOutputTokens when possible.
+ */
+export function guardFunction<TArgs extends readonly unknown[], TResult>(
+  fn: (...args: TArgs) => TResult,
+  config: GuardConfig = {}
+): ((...args: TArgs) => TResult) & GuardEventControls {
+  const methodName = config.guardedMethods?.[0] ?? 'run';
+  const container = { [methodName]: fn } as Record<string, (...args: TArgs) => TResult>;
+  const guarded = guard(container, {
+    ...config,
+    guardedMethods: [methodName],
+  });
+  const guardedFn = ((...args: TArgs) => guarded[methodName](...args)) as ((...args: TArgs) => TResult) &
+    GuardEventControls;
+
+  guardedFn.on = guarded.on;
+  guardedFn.off = guarded.off;
+  guardedFn.getGuardState = guarded.getGuardState;
+
+  return guardedFn;
+}
+
+/**
+ * Express-compatible middleware that attaches req.localSafety.check() and req.guard.check().
+ */
+export function middleware(config: GuardConfig = {}): (req: MiddlewareRequest, res: unknown, next: () => void) => void {
+  const core = new GuardCore(config);
+
+  return (req: MiddlewareRequest, _res: unknown, next: () => void) => {
+    const controls = {
+      state: core.getState(),
+      check: (context: RequestContext) => {
+        core.check(context);
+      },
+      on: core.on.bind(core),
+      off: core.off.bind(core),
     };
+
+    req.localSafety = controls;
+    req.guard = controls;
     next();
   };
 }
 
-// Local loop detection - basic hash only (each process thinks it's safe)
-function detectLocalLoop(prompt: string, state: GuardState): boolean {
-  const promptHash = prompt.slice(0, 100);
-  const recentHashes = (state as any).recentHashes || [];
-  
-  const count = recentHashes.filter((h: string) => h === promptHash).length;
-  
-  recentHashes.push(promptHash);
-  if (recentHashes.length > 5) recentHashes.shift(); // Very limited memory
-  (state as any).recentHashes = recentHashes;
-  
-  return count >= 3; // Basic detection only
+/**
+ * Error thrown when a request is blocked before provider execution.
+ */
+export { GuardError };
+
+/**
+ * Pricing lookup re-export kept for compatibility with older imports.
+ */
+export { getPricing } from '../pricing/index.js';
+
+interface MiddlewareRequest {
+  localSafety?: MiddlewareControls;
+  guard?: MiddlewareControls;
 }
 
-// Local retry detection - basic keyword only (each process thinks it's safe)
-function detectLocalRetry(prompt: string, state: GuardState): boolean {
-  const retryKeywords = ['retry', 'again', 'repeat', 'error', 'fail', 'timeout'];
-  const hasRetryKeyword = retryKeywords.some(keyword => 
-    prompt.toLowerCase().includes(keyword)
-  );
-  
-  if (!hasRetryKeyword) return false;
-  
-  const recentRetries = (state as any).recentRetries || [];
-  const recentRetryCount = recentRetries.filter((r: boolean) => r).length;
-  
-  recentRetries.push(true);
-  if (recentRetries.length > 3) recentRetries.shift(); // Very limited memory
-  (state as any).recentRetries = recentRetries;
-  
-  return recentRetryCount >= 2; // Basic detection only
+interface MiddlewareControls {
+  state: GuardState;
+  check(context: RequestContext): void;
+  on(eventName: GuardEventName, handler: GuardEventHandler): () => void;
+  off(eventName: GuardEventName, handler: GuardEventHandler): void;
 }
 
-// Extract request context (local only)
-function extractContext(args: any[], prop: string): RequestContext {
-  const params = args[0] || {};
-  const model = params.model || 'unknown';
-  const messages = params.messages || [];
-  const prompt = messages.map((m: any) => m.content).join(' ').slice(0, 200);
-
-  const inputText = JSON.stringify(messages);
-  const estimatedInputTokens = Math.ceil(inputText.length / 4);
-  const maxOutputTokens = params.max_tokens || 1000;
-  const tokens = estimatedInputTokens + maxOutputTokens;
-
-  const pricing = lookupPricing(model);
-  const inputPer1kTokens = pricing?.inputPer1kTokens ?? 0.01;
-  const outputPer1kTokens = pricing?.outputPer1kTokens ?? 0.03;
-  const estimatedCost = (estimatedInputTokens / 1000) * inputPer1kTokens +
-                        (maxOutputTokens / 1000) * outputPer1kTokens;
-
-  return {
-    model,
-    tokens,
-    estimatedCost,
-    timestamp: Date.now(),
-    prompt,
-  };
+function isObject(value: unknown): value is object {
+  return typeof value === 'object' && value !== null;
 }
 
-// Custom error (local only)
-export class GuardError extends Error {
-  context: RequestContext;
-  constructor(message: string, context?: RequestContext) {
-    super(message);
-    this.name = 'GuardError';
-    this.context = context!;
-  }
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return isObject(value) && typeof (value as { then?: unknown }).then === 'function';
+}
+
+function stripGuardMetadata(args: readonly unknown[]): readonly unknown[] {
+  const [first, ...rest] = args;
+  if (!isPlainRecord(first)) return args;
+
+  const {
+    projectId: _projectId,
+    project_id: _project_id,
+    userId: _userId,
+    user_id: _user_id,
+    sessionId: _sessionId,
+    session_id: _session_id,
+    ...providerParams
+  } = first;
+
+  return [providerParams, ...rest];
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === '[object Object]';
 }

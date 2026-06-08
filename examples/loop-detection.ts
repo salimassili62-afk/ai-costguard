@@ -1,44 +1,37 @@
-/**
- * Example: Loop detection
- *
- * Simulates an AI agent stuck in a loop.
- * CostGuard detects the repetition, blocks it, and shows the estimated save.
- */
-
-import { guard, GuardError } from '../src/index';
+import { guard, GuardError } from '@salimassili/ai-costguard';
 
 const fakeOpenAI = {
   chat: {
     completions: {
-      create: async ({ messages }: any) => {
-        return {
-          choices: [{ message: { content: 'Processing...' } }],
-        };
-      },
+      create: async () => ({
+        choices: [{ message: { content: 'Processing...' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 10 },
+      }),
     },
   },
 };
 
-const openai = guard(fakeOpenAI, { budget: 100.00 });
+const openai = guard(fakeOpenAI, { budget: 100 });
 
 async function main() {
-  const prompt = 'Are we there yet?';
+  console.log('Loop detection demo');
 
-  console.log('Simulating an AI agent stuck in a loop...\n');
-
-  for (let i = 1; i <= 5; i++) {
+  for (let index = 1; index <= 5; index++) {
     try {
       await openai.chat.completions.create({
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: prompt }],
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: 'Are we there yet?' }],
+        max_tokens: 50,
       });
-    } catch (err) {
-      if (err instanceof GuardError) {
-        console.log('\n✅ Loop killed. Agent stopped before it could spiral.');
-        break;
+      console.log(`call ${index}: allowed`);
+    } catch (error) {
+      if (error instanceof GuardError) {
+        console.log(`call ${index}: blocked with ${error.code}`);
+        return;
       }
+      throw error;
     }
   }
 }
 
-main();
+main().catch(console.error);

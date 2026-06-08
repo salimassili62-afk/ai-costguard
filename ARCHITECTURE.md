@@ -1,174 +1,97 @@
-# AI Execution Control Platform - Architecture
+# AI CostGuard Architecture
 
-## Vision
-The default execution layer for all autonomous AI agents on the internet.
+This document describes the implementation that ships in `@salimassili/ai-costguard`.
 
-## Core Philosophy
-- **Pre-execution governance**: Decision layer BEFORE any LLM/tool call
-- **Invisible but mandatory**: Embedded infrastructure, not optional tool
-- **Intelligent prevention**: Pattern recognition, not just rule matching
+## Package Boundaries
 
-## System Architecture
+- Root import: `@salimassili/ai-costguard`
+  - `guard`
+  - `guardFunction`
+  - `GuardError`
+  - `middleware`
+  - pricing helpers
+  - public config/event/context types
+- Pro import: `@salimassili/ai-costguard/pro`
+  - `GuardPro`
+  - Redis client types
+  - deprecated license compatibility helper
+- Pricing import: `@salimassili/ai-costguard/pricing`
+  - pricing registry helpers
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        AI AGENT APPLICATION                      │
-│  (LangChain, CrewAI, Custom Code, OpenAI SDK, Anthropic SDK)   │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              EXECUTION INTERCEPTOR LAYER (<10ms)                │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
-│  │   SDK Hook  │  │  Proxy      │  │  Local Mode │            │
-│  │  (Node/TS)  │  │  (Edge)     │  │  (Offline)  │            │
-│  └─────────────┘  └─────────────┘  └─────────────┘            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              AI AGENT BEHAVIOR GRAPH ENGINE                     │
-│  - Workflow state tracking                                      │
-│  - Multi-step agent graph                                       │
-│  - Loop detection (semantic + structural)                         │
-│  - Tool call chain analysis                                     │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              POLICY ENGINE (Hierarchical)                       │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐                │
-│  │ Tenant  │ │  Team   │ │  User   │ │ Workflow│                │
-│  │  Level  │ │  Level  │ │  Level  │ │  Level  │                │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘                │
-│                                                                  │
-│  Rules: max cost, max depth, repetition threshold, etc.        │
-│  Modes: warn → throttle → block                                │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              COST-TO-GO PREDICTION ENGINE                       │
-│  - Tokens remaining estimation                                  │
-│  - Downstream tool call prediction                              │
-│  - Worst-case scenario calculation                              │
-│  - Budget burn rate analysis                                    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              LEARNING SYSTEM (Dataset Moat)                     │
-│  - Anonymized failure pattern storage                           │
-│  - Behavioral dataset aggregation                               │
-│  - Detection improvement over time                              │
-│  - Community pattern sharing (future)                           │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              EXPLAINABILITY LAYER                               │
-│  - Decision reasoning                                           │
-│  - Cost prediction breakdown                                    │
-│  - Policy rule triggered                                        │
-│  - Confidence score                                             │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                    ┌─────────┴─────────┐
-                    ▼                   ▼
-            ┌─────────────┐      ┌─────────────┐
-            │   ALLOW     │      │   BLOCK     │
-            │  Execute    │      │  Throttle   │
-            │  Continue   │      │  Explain    │
-            └─────────────┘      └─────────────┘
+Redis is intentionally isolated behind `/pro` so free core users do not load `ioredis` on root import.
+
+## Runtime Flow
+
+```mermaid
+flowchart TD
+  A["Application SDK client"] --> B["guard(client, config)"]
+  B --> C["Recursive Proxy"]
+  C --> D{"method path guarded?"}
+  D -- "no" --> E["Call original method"]
+  D -- "yes" --> F["Extract request context"]
+  F --> G["Estimate tokens and cost"]
+  G --> H["Resolve scope"]
+  H --> I["GuardCore.check"]
+  I --> J{"allow?"}
+  J -- "no" --> K["emit block, append event log if configured, webhook best effort, throw GuardError"]
+  J -- "yes" --> L["Call provider method"]
+  L --> M["Record actual usage if response has usage fields"]
 ```
 
-## Performance Requirements
+`guardFunction(fn, config)` adapts function-style SDKs into the same `GuardCore` flow by protecting a synthetic `run` method.
 
-- **P99 latency overhead**: <10ms
-- **Fail-open mode**: Degrade gracefully on errors
-- **Offline mode**: Support local execution without cloud
-- **Thread safety**: Non-blocking execution
+## Guarded Methods
 
-## Data Flow
+Default method paths:
 
-1. **Interception**: Hook into SDK/Proxy before API call
-2. **Graph Analysis**: Update agent workflow state
-3. **Policy Check**: Evaluate against hierarchical rules
-4. **Cost Prediction**: Calculate cost-to-go
-5. **Learning Update**: Store pattern for dataset
-6. **Decision**: Allow/Throttle/Block with explanation
-7. **Execution**: Pass to LLM or return error
+- `chat.completions.create`
+- `completions.create`
+- `responses.create`
+- `messages.create`
 
-## Multi-Tenant Architecture
+Applications can replace this list with `guardedMethods`.
 
-```
-Tenant A                          Tenant B
-   │                                  │
-   ▼                                  ▼
-┌────────┐                      ┌────────┐
-│Policy A│                      │Policy B│
-│State A │                      │State B │
-└────────┘                      └────────┘
-   │                                  │
-   └──────────┐    ┌─────────────────┘
-              ▼    ▼
-        ┌──────────────┐
-        │  Control     │
-        │  Plane       │
-        │ (Stateful)    │
-        └──────────────┘
-              │
-              ▼
-        ┌──────────────┐
-        │  Learning    │
-        │  Dataset     │
-        │  (Anonymized)│
-        └──────────────┘
-```
+## Scope Model
 
-## Defensibility Mechanisms
+Scopes isolate budget and behavior history. A scope can include:
 
-1. **Behavioral Dataset Moat**
-   - Anonymized agent failure patterns
-   - Millions of execution traces
-   - Improves detection accuracy over time
+- `projectId`
+- `userId`
+- `sessionId`
 
-2. **Integration Depth**
-   - Embedded in frameworks (LangChain, CrewAI)
-   - One-line setup for developers
-   - Hard to replace once integrated
+If no scope is configured, all calls use the `default` scope. Prompt and retry histories are pruned by `historyTtlMs`.
 
-3. **Policy Marketplace (Future)**
-   - Community-shared guardrails
-   - Enterprise templates
-   - Network effects
+## Accounting Model
 
-## Success Metrics
+The guard tracks estimates before provider execution:
 
-- **Prevented cost**: $ saved per customer
-- **False positive rate**: <1%
-- **Latency**: P99 <10ms
-- **Setup time**: <5 minutes
-- **Integration**: <1 line of code
+- `attemptedCost`: all guarded attempts
+- `totalCost`: allowed estimated spend
+- `blockedCost`: estimated spend blocked before provider execution
+- `actualCost`: provider-reported usage when available
 
-## Integration Modes
+Budget enforcement uses estimated allowed spend because the decision happens before the provider call.
 
-### SDK Mode (Recommended)
-```typescript
-import { withExecutionControl } from 'ai-execution-control';
+## Behavior Detection
 
-const client = withExecutionControl(new OpenAI({...}), {
-  tenantId: 'org-123',
-  policy: { maxCostPerWorkflow: 10 }
-});
-```
+Loop detection uses character trigram cosine similarity. A prompt is blocked when at least `loopMinRepeats` recent prompts in the same scope exceed `loopSimilarityThreshold`.
 
-### Proxy Mode
-```bash
-export OPENAI_BASE_URL=http://localhost:3456/v1
-```
+Retry detection uses conservative retry/failure keywords and scoped retry history. It is heuristic and intentionally configurable.
 
-### Local Mode (Offline)
-```typescript
-const control = new ExecutionControl({ mode: 'local' });
-```
+## Local Dashboard
+
+`eventLogPath` enables opt-in JSONL event records. Prompt text is redacted unless `eventLogPrompt: 'preview'` is set.
+
+The CLI `dashboard` command reads that local file and serves a small HTTP view on `127.0.0.1` by default. It does not send telemetry or aggregate data across machines.
+
+## Non-Goals
+
+This repository does not currently ship:
+
+- hosted dashboards
+- proxy server
+- API-key authentication layer
+- multi-tenant SaaS control plane
+- persistent prompt database
+- provider billing reconciliation
+- semantic embedding loop detection

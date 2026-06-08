@@ -1,5 +1,7 @@
 node_modules/
 dist/
 *.log
+*.tgz
+.ai-costguard/
 .ai-execution-firewall/
 .DS_Store

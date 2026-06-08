@@ -4,8 +4,8 @@ import { Inter } from 'next/font/google'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-  title: 'AI CostGuard - AI Runtime Kill Switch',
-  description: 'The emergency kill switch for runaway AI spending. Stop infinite loops, retry storms, and cost explosions in seconds.',
+  title: 'AI CostGuard - Runtime safety for AI agents',
+  description: 'Local-first runtime safety layer for AI agents that blocks runaway costs, loops, retries, and budget overruns before API calls execute.',
 }
 
 export default function RootLayout({

@@ -1,71 +1,44 @@
-/**
- * Demo: Tool Retry Explosion
- *
- * Simulates an AI agent that keeps retrying a failing external tool.
- * CostGuard detects the endless retries and kills the loop.
- */
+import { guard, GuardError } from '@salimassili/ai-costguard';
 
-import { guard, GuardError } from '../src/index';
-
-// Fake agent with a failing tool integration
 const fakeAgent = {
   chat: {
     completions: {
-      create: async ({ messages }: any) => {
-        const content = messages[0].content;
-
-        // Simulate agent trying to use a failing tool
-        if (content.includes('search') || content.includes('fetch')) {
-          // Agent keeps retrying the same failed operation
-          return {
-            choices: [{
-              message: {
-                content: 'Error: Tool failed. Retrying... Retrying... Retrying...'
-              }
-            }]
-          };
-        }
-
-        return {
-          choices: [{ message: { content: 'Success' } }]
-        };
-      }
-    }
-  }
+      create: async () => ({
+        choices: [{ message: { content: 'Tool failed. Retrying...' } }],
+        usage: { prompt_tokens: 30, completion_tokens: 30 },
+      }),
+    },
+  },
 };
 
-// Wrap with strict retry limits
-const agent = guard(fakeAgent, { budget: 5 });
+const agent = guard(fakeAgent, { budget: 5, retryThreshold: 2 });
 
 async function main() {
-  console.log('=== Tool Retry Explosion Demo ===\n');
-  console.log('Agent keeps retrying a failed tool call:');
-  console.log('"Error: Tool failed. Retrying... Retrying..."\n');
+  console.log('Retry storm demo');
 
-  const searchPrompt = 'Search the database for user data';
+  const prompts = [
+    'retry failed search request for user data',
+    'again after timeout while fetching user data',
+    'repeat after error while fetching user data',
+  ];
 
-  for (let i = 1; i <= 10; i++) {
+  for (const [index, prompt] of prompts.entries()) {
     try {
-      console.log(`Call ${i}: Agent retrying failed tool...`);
       await agent.chat.completions.create({
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: searchPrompt }]
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 200,
       });
-
-      // Small delay to simulate real retry timing
-      await new Promise(r => setTimeout(r, 100));
-    } catch (err) {
-      if (err instanceof GuardError) {
-        console.log('\n✅ RETRY EXPLOSION BLOCKED');
-        console.log(`   ${err.message}`);
-        console.log('\n💰 Prevented runaway retry loop.');
-        console.log('   Agent would have hammered your API indefinitely.');
+      console.log(`call ${index + 1}: allowed`);
+    } catch (error) {
+      if (error instanceof GuardError) {
+        console.log(`call ${index + 1}: blocked with ${error.code}`);
+        console.log(error.message);
         return;
       }
+      throw error;
     }
   }
-
-  console.log('\n❌ Demo failed: retry loop should have been detected');
 }
 
-main();
+main().catch(console.error);

@@ -7,12 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "ai:check": "aifw check",
-    "ai:dashboard": "aifw dashboard",
-    "ai:budget": "aifw budget"
+    "ai:check": "aifw check"
   },
   "dependencies": {
-    "@salimassili/ai-costguard": "^1.1.9",
+    "@salimassili/ai-costguard": "^2.0.0",
     "next": "14.2.0",
     "openai": "^4.28.0",
     "react": "^18.2.0",

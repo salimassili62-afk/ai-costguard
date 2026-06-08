@@ -11,7 +11,10 @@ export const openai = guard(
   new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   }),
-  { budget: 50 }
+  {
+    budget: 50,
+    scope: { projectId: 'nextjs-template' },
+  }
 );
 
 // Type export for use in API routes

@@ -1,46 +1,42 @@
 # Contributing
 
-## Development Setup
+## Setup
 
 ```bash
-# Clone the repository
 git clone <repository-url>
-cd ai-execution-firewall
-
-# Install dependencies
-npm install
-
-# Run tests
-npm test
-
-# Build
-npm run build
+cd ai-costguard
+npm ci
 ```
 
-## Code Style
+## Required Checks
 
-- Use TypeScript for all new code
-- Follow existing code structure and naming conventions
-- Add tests for new features
-- Update README for user-facing changes
+Run these before opening a PR:
 
-## Testing
+```bash
+npm run build
+npm test
+npm run smoke
+npm audit --omit=dev
+npm pack --dry-run
+```
 
-- All tests must pass before submitting a PR
-- Use Jest for unit and integration tests
-- Test both success and failure paths
-- Mock external API calls in tests
+The project uses:
 
-## Commit Messages
+- TypeScript with `moduleResolution: NodeNext`
+- Node's built-in `node:test` runner
+- ESM-only package output
 
-- Use clear, descriptive commit messages
-- Reference related issues when applicable
-- Keep commits focused on a single change
+## Contribution Rules
 
-## Pull Request Process
+- Keep documentation aligned with shipped behavior.
+- Add tests for behavior changes.
+- Do not add provider SDK dependencies to the root package.
+- Keep Redis/Pro functionality behind `@salimassili/ai-costguard/pro`.
+- Do not claim proxy, dashboard, SaaS, auth, or telemetry features unless they are implemented and tested.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Ensure all tests pass
-5. Submit a pull request with a clear description
+## Release Checklist
+
+1. Update `CHANGELOG.md`.
+2. Run the required checks.
+3. Inspect `npm pack --dry-run` output.
+4. Verify examples/templates reference the current package API.
