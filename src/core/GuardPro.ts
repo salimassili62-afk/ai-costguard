@@ -39,8 +39,6 @@ export interface GuardProConfig {
   discordWebhook?: string;
   /** Combined webhook configuration. */
   webhooks?: GuardWebhookConfig;
-  /** Deprecated compatibility field. GuardPro does not enforce licenses locally. */
-  licenseKey?: string;
   /** Optional Redis-compatible client. When omitted, GuardPro pools ioredis clients by URL. */
   redisClient?: GuardProRedisClient;
 }
@@ -342,21 +340,8 @@ export class GuardPro {
 }
 
 /**
- * Deprecated compatibility helper.
- *
- * This is a format sanity check only. It is not license enforcement and should
- * not be used for commercial access control.
- */
-export function validateLicense(key: string): boolean {
-  return typeof key === 'string' && key.trim().length >= 16;
-}
-
-/**
  * Creates GuardPro.
- *
- * The return type remains nullable for backwards compatibility with older
- * callers, but local license rejection has intentionally been removed.
  */
-export function getProGuard(config: GuardProConfig): GuardPro | null {
+export function getProGuard(config: GuardProConfig): GuardPro {
   return new GuardPro(config);
 }

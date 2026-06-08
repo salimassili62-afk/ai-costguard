@@ -14,7 +14,6 @@ This document describes the implementation that ships in `@salimassili/ai-costgu
 - Pro import: `@salimassili/ai-costguard/pro`
   - `GuardPro`
   - Redis client types
-  - deprecated license compatibility helper
 - Pricing import: `@salimassili/ai-costguard/pricing`
   - pricing registry helpers
 

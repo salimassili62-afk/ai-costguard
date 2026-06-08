@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { GuardError } from '../dist/index.js';
-import { GuardPro, getProGuard, validateLicense } from '../dist/pro.js';
+import { GuardPro, getProGuard } from '../dist/pro.js';
 
 class FakeRedis {
   status = 'wait';
@@ -75,9 +75,6 @@ test('GuardPro falls back to local state when Redis fails', async () => {
   await assert.rejects(() => guard.checkAndCharge('project-b', 0.02), /exceeded budget/);
 });
 
-test('GuardPro keeps license helpers as non-enforcing compatibility checks', () => {
-  assert.equal(validateLicense('short'), false);
-  assert.equal(validateLicense('aaaaaaaaaaaaaaaa'), true);
-  assert.ok(getProGuard({ redisUrl: 'redis://unit', budget: 1, licenseKey: 'short' }) instanceof GuardPro);
-  assert.ok(new GuardPro({ redisUrl: 'redis://unit', budget: 1, licenseKey: 'short' }) instanceof GuardPro);
+test('GuardPro factory creates guards without license compatibility stubs', () => {
+  assert.ok(getProGuard({ redisUrl: 'redis://unit', budget: 1 }) instanceof GuardPro);
 });

@@ -1,11 +1,20 @@
 # Changelog
 
-## 2.0.0 - Unreleased
+## 2.0.1 - Unreleased
+
+### Changed
+
+- Removed `licenseKey`, `validateLicense`, and `INVALID_LICENSE` compatibility surfaces. AI CostGuard does not contain license-key checks or local commercial-license enforcement.
+- Added explicit built-in pricing freshness notice: `2026-06-07`.
+- Added README loop detection tuning guidance and trust sections.
+- Added token accuracy benchmark documentation showing the estimator materially overestimates the fixed corpus.
+
+## 2.0.0 - 2026-06-08
 
 ### Changed
 
 - Moved Redis-backed `GuardPro` exports to `@salimassili/ai-costguard/pro` so the root import stays lightweight.
-- Removed fake local license enforcement from `GuardPro`; `licenseKey` and `validateLicense()` are compatibility helpers only.
+- Removed fake local license enforcement from `GuardPro`.
 - Unknown models now block by default unless runtime pricing, guard pricing overrides, or explicit fallback pricing is configured.
 - Guard proxy now checks known AI SDK method paths instead of charging every function call on the wrapped client.
 - Loop detection now requires repeated similar prompts in the same scope before blocking.

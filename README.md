@@ -5,6 +5,22 @@ AI CostGuard is a local-first runtime safety layer for AI agents that prevents r
 
 It is local-first. It does not include a SaaS control plane, cloud dashboard, proxy gateway, telemetry service, billing reconciliation service, or hard security boundary.
 
+## What AI CostGuard Does
+
+- Checks selected AI SDK calls before they execute.
+- Estimates request cost from model pricing, prompt text, and reserved output tokens.
+- Blocks unknown models unless explicit pricing is supplied.
+- Blocks budget overruns, repeated prompt loops, retry storms, and max-step overruns.
+- Emits structured errors and local events your app can handle.
+
+## What AI CostGuard Does Not Do
+
+- It does not call providers for real-time pricing.
+- It does not reconcile provider invoices or replace provider billing alerts.
+- It does not provide auth, API-key security, or a hard security boundary.
+- It does not run a hosted dashboard, SaaS backend, or cloud telemetry service.
+- It does not guarantee exact tokenizer parity with OpenAI, Anthropic, or other providers.
+
 ## Install
 
 ```bash
@@ -38,6 +54,26 @@ try {
     throw error;
   }
 }
+```
+
+## Before / After
+
+Without AI CostGuard:
+
+```ts
+await openai.chat.completions.create(request);
+```
+
+With AI CostGuard:
+
+```ts
+const openai = guard(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }), {
+  budget: 5,
+  maxSteps: 50,
+  scope: { projectId: 'agent-api', sessionId: runId },
+});
+
+await openai.chat.completions.create(request);
 ```
 
 ## What It Guards
@@ -107,8 +143,6 @@ Current runtime block codes:
 - `LOOP_DETECTED`
 - `RETRY_STORM_DETECTED`
 
-`INVALID_LICENSE` remains in the exported type for compatibility with older callers, but the current Pro helper does not enforce local license checks.
-
 ## Configuration
 
 ```ts
@@ -141,6 +175,26 @@ guard(client, {
 
 `scope` isolates budgets and behavior history. If no scope is supplied, the guard uses one process-local default scope.
 
+## Loop Detection Tuning
+
+Default loop detection uses character trigram cosine similarity with `loopSimilarityThreshold: 0.85` and `loopMinRepeats: 2`.
+
+- Higher threshold, such as `0.95`: fewer false positives, but near-duplicate loops can slip through.
+- Lower threshold, such as `0.75`: catches looser repeats, but unrelated prompts can be blocked.
+- Higher `loopMinRepeats`: waits for more repeated prompts before blocking.
+- Lower `loopMinRepeats`: blocks faster, but is more aggressive.
+
+```ts
+const openai = guard(client, {
+  budget: 5,
+  loopSimilarityThreshold: 0.9,
+  loopMinRepeats: 3,
+  scope: { sessionId: 'agent-run-123' },
+});
+```
+
+Loop detection is heuristic. Expect false positives and false negatives, especially for short prompts, templated prompts, and prompts that share a lot of boilerplate.
+
 ## Accounting Semantics
 
 AI CostGuard is a pre-call estimator, not a billing ledger.
@@ -155,6 +209,8 @@ Budget decisions use estimated allowed cost. Actual usage is recorded for observ
 ## Pricing
 
 Known model pricing comes from built-in registry entries, runtime registrations, or per-guard overrides. Unknown models are blocked by default.
+
+Pricing last updated: `2026-06-07`. Provider pricing changes; AI CostGuard does not fetch real-time pricing. Override pricing manually when provider pages or your contract pricing differ from the built-ins.
 
 ```ts
 import { registerPricing } from '@salimassili/ai-costguard';
@@ -298,7 +354,7 @@ await pro.shutdown();
 
 `ioredis` is an optional dependency and is not loaded by the root import.
 
-`licenseKey` is accepted as a deprecated compatibility field only. AI CostGuard does not enforce commercial licenses locally, and `validateLicense()` is a format sanity helper, not security.
+AI CostGuard does not include license-key checks or local commercial-license enforcement.
 
 ## CLI
 
@@ -338,6 +394,8 @@ The script reports runtime overhead, approximate heap delta, false-positive scen
 
 Latest local benchmark in this repo on Node `v24.14.1` / Windows measured `0.020691 ms` added per mocked guarded call over `5000` iterations. Re-run on your target runtime before using this number in performance-sensitive claims.
 
+Token accuracy benchmark, fixed corpus, `gpt-tokenizer cl100k_base` fixture counts: average error `259.08%`, median error `263.98%`, max error `323.53%`, `8` samples. The current estimator is conservative and can substantially overestimate short prompts. Use this package as a pre-call guardrail, not an exact tokenizer.
+
 ## Why Not 50 Lines Of Code?
 
 A simple homemade budget check can stop one request after one counter crosses one number. AI CostGuard packages the parts that usually become messy once agents enter production:
@@ -368,6 +426,7 @@ npm pack --dry-run
 ## Limitations
 
 - Token counting is approximate and dependency-free.
+- Token estimation is intentionally conservative and can overestimate materially; see the token accuracy benchmark.
 - Pricing entries can become stale; override them for production.
 - The free guard is process-local.
 - Loop detection uses character trigram similarity, not embeddings.

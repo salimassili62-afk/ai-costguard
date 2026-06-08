@@ -23,6 +23,13 @@ The benchmark script measures:
 - Loop detection block step for repeated prompts
 - Cost-estimation sample boundaries
 
+Token accuracy benchmark:
+
+```bash
+npm run build
+npm run benchmark:tokens
+```
+
 ## Current Local Result
 
 Current local run:
@@ -41,6 +48,18 @@ Current local run:
 Do not quote benchmark numbers without the Node version, platform, iteration count, and date.
 
 Generated benchmark output is intentionally not published in the npm package. Re-run the benchmark on your target runtime before using numbers in public claims.
+
+## Token Accuracy Result
+
+Current fixed-corpus token accuracy run:
+
+- Reference: `gpt-tokenizer cl100k_base` fixture counts
+- Samples: `8`
+- Average error: `259.08%`
+- Median error: `263.98%`
+- Max error: `323.53%`
+
+This shows the current dependency-free estimator is conservative and materially overestimates this corpus. Treat AI CostGuard estimates as pre-call guardrails, not exact provider tokenizer counts.
 
 ## Interpreting Results
 

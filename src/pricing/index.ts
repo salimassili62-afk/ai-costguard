@@ -1,6 +1,15 @@
 const STALE_PRICING_DAYS = 30;
 
 /**
+ * Last manual verification date for the built-in pricing registry.
+ *
+ * Provider pricing changes; use pricingOverrides/registerPricing for current
+ * production pricing when provider pages differ from these built-ins.
+ */
+export const BUILTIN_PRICING_LAST_UPDATED = '2026-06-07';
+// pricing last updated: 2026-06-07
+
+/**
  * Pricing entry expressed in USD per 1,000 tokens.
  */
 export interface ModelPricing {

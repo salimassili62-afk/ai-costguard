@@ -43,5 +43,5 @@ JSONL event logs include model, method, scope key, estimated cost, event type, a
 
 - Cost checks are estimates, not provider billing records.
 - Loop and retry detection are heuristics and can have false positives or false negatives.
-- `licenseKey` and `validateLicense()` are compatibility helpers only. They do not enforce commercial access control.
+- AI CostGuard does not include license-key checks or local commercial-license enforcement.
 - The free guard is process-local and does not protect other processes unless the application shares state externally.

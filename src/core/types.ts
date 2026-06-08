@@ -8,9 +8,7 @@ export type GuardErrorCode =
   | 'BUDGET_EXCEEDED'
   | 'MAX_STEPS_EXCEEDED'
   | 'LOOP_DETECTED'
-  | 'RETRY_STORM_DETECTED'
-  /** Reserved for compatibility; current GuardPro does not enforce local licenses. */
-  | 'INVALID_LICENSE';
+  | 'RETRY_STORM_DETECTED';
 
 /**
  * Webhook destinations used by the guard when a request is blocked.

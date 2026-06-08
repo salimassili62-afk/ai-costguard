@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { getPricing, listPricing, registerPricing } from '../dist/index.js';
+import { BUILTIN_PRICING_LAST_UPDATED, getPricing, listPricing, registerPricing } from '../dist/index.js';
 
 test('pricing resolves exact, fuzzy, runtime, and override entries', () => {
+  assert.equal(BUILTIN_PRICING_LAST_UPDATED, '2026-06-07');
   assert.equal(getPricing('gpt-4o-mini')?.model, 'gpt-4o-mini');
   assert.equal(getPricing('claude-3-haiku-20240307')?.model, 'claude-3-haiku');
   assert.equal(getPricing('internal-gpt-4-wrapper'), undefined);
