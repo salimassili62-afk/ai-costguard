@@ -1,13 +1,20 @@
 # Changelog
 
-## 2.0.1 - Unreleased
+## 2.1.0 - Unreleased
+
+### Added
+
+- Added `registerTokenizer()` for exact/provider-specific token counting without adding production dependencies.
+- Added `getPricingMeta()` and `aifw pricing --check-stale --days <n>` for pricing freshness checks.
+- Added structured `loopDetection` config with `similarityThreshold`, `minHistorySize`, and `windowSize`.
+- Expanded the token accuracy benchmark to a 24-sample proxy corpus with per-sample output.
 
 ### Changed
 
-- Removed `licenseKey`, `validateLicense`, and `INVALID_LICENSE` compatibility surfaces. AI CostGuard does not contain license-key checks or local commercial-license enforcement.
+- Removed obsolete license-related surfaces. AI CostGuard does not contain license-key checks or local commercial-license enforcement.
 - Added explicit built-in pricing freshness notice: `2026-06-07`.
-- Added README loop detection tuning guidance and trust sections.
-- Added token accuracy benchmark documentation showing the estimator materially overestimates the fixed corpus.
+- Updated README loop detection tuning, pricing freshness, token accuracy, and trust guidance.
+- Documented that the built-in estimator materially overestimates the fixed proxy corpus and that production users can register exact tokenizers.
 
 ## 2.0.0 - 2026-06-08
 

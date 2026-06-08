@@ -20,6 +20,7 @@ const DEFAULT_MAX_HISTORY = 32;
 const DEFAULT_HISTORY_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_LOOP_THRESHOLD = 0.85;
 const DEFAULT_LOOP_MIN_REPEATS = 2;
+const DEFAULT_LOOP_WINDOW_SIZE = 5;
 const DEFAULT_RETRY_THRESHOLD = 2;
 const DEFAULT_GUARDED_METHODS = [
   'chat.completions.create',
@@ -117,7 +118,7 @@ export class GuardCore {
       | 'unknownModelPolicy'
       | 'eventLogPrompt'
     >
-  > &
+  > & { loopWindowSize: number } &
     Pick<
       GuardConfig,
       | 'maxSteps'
@@ -128,22 +129,31 @@ export class GuardCore {
       | 'eventLogPath'
       | 'slackWebhook'
       | 'discordWebhook'
-    >;
+  >;
   private readonly state: GuardState;
   private readonly emitter = new GuardEventEmitter();
+  private readonly approximateTokenWarnings = new Set<string>();
 
   /**
    * Creates a process-local guard evaluator.
    */
   constructor(config: GuardConfig = {}, sharedState: GuardState = createGuardState()) {
+    const loopSimilarityThreshold =
+      config.loopDetection?.similarityThreshold ?? config.loopSimilarityThreshold ?? DEFAULT_LOOP_THRESHOLD;
+    const loopMinRepeats = config.loopDetection?.minHistorySize ?? config.loopMinRepeats ?? DEFAULT_LOOP_MIN_REPEATS;
+    const loopWindowSize = config.loopDetection?.windowSize ?? DEFAULT_LOOP_WINDOW_SIZE;
+
+    validateLoopConfig(loopSimilarityThreshold, loopMinRepeats, loopWindowSize);
+
     this.config = {
       budget: config.budget ?? DEFAULT_BUDGET,
       behaviorAnalysis: config.behaviorAnalysis ?? true,
       maxHistory: config.maxHistory ?? DEFAULT_MAX_HISTORY,
       historyTtlMs: Math.max(0, config.historyTtlMs ?? DEFAULT_HISTORY_TTL_MS),
       maxSteps: config.maxSteps,
-      loopSimilarityThreshold: config.loopSimilarityThreshold ?? DEFAULT_LOOP_THRESHOLD,
-      loopMinRepeats: Math.max(1, Math.trunc(config.loopMinRepeats ?? DEFAULT_LOOP_MIN_REPEATS)),
+      loopSimilarityThreshold,
+      loopMinRepeats: Math.trunc(loopMinRepeats),
+      loopWindowSize: Math.trunc(loopWindowSize),
       retryThreshold: Math.max(1, Math.trunc(config.retryThreshold ?? DEFAULT_RETRY_THRESHOLD)),
       guardedMethods: config.guardedMethods ?? [...DEFAULT_GUARDED_METHODS],
       unknownModelPolicy: config.unknownModelPolicy ?? 'block',
@@ -200,7 +210,12 @@ export class GuardCore {
     const params = args[0];
     const record = isRecord(params) ? params : {};
     const model = typeof record.model === 'string' && record.model.trim() ? record.model.trim() : 'unknown';
+    const scope = this.extractScope(record);
+    const scopeKey = createScopeKey(scope);
     const tokenEstimate = estimateRequestTokens(record);
+    if (tokenEstimate.approximate) {
+      this.warnApproximateTokens(model, scopeKey);
+    }
     const registryPricing = getPricing(model, this.config.pricingOverrides);
     const pricing = registryPricing ?? (this.config.unknownModelPolicy === 'fallback' ? this.config.unknownModelPricing : undefined);
     const inputPer1kTokens = pricing?.inputPer1kTokens ?? 0;
@@ -208,15 +223,13 @@ export class GuardCore {
     const estimatedCost =
       (tokenEstimate.inputTokens / 1000) * inputPer1kTokens +
       (tokenEstimate.outputTokens / 1000) * outputPer1kTokens;
-    const scope = this.extractScope(record);
-    const scopeKey = createScopeKey(scope);
-
     return {
       model,
       pricingKnown: pricing !== undefined,
       pricing,
       tokens: tokenEstimate.tokens,
       inputTokens: tokenEstimate.inputTokens,
+      approximateTokens: tokenEstimate.approximate,
       outputTokens: tokenEstimate.outputTokens,
       estimatedCost,
       timestamp: Date.now(),
@@ -303,7 +316,9 @@ export class GuardCore {
   private findLoopSimilarity(scope: GuardScopeState, prompt: string): { max: number; count: number } {
     if (!prompt.trim()) return { max: 0, count: 0 };
 
-    const history = scope.recentPrompts?.map((entry) => entry.prompt) ?? [];
+    const history = (scope.recentPrompts ?? [])
+      .slice(-this.config.loopWindowSize)
+      .map((entry) => entry.prompt);
     const max = maxCosineSimilarity(prompt, history);
     const count = history.filter((candidate) => cosineSimilarity(prompt, candidate) >= this.config.loopSimilarityThreshold).length;
     return { max, count };
@@ -422,6 +437,17 @@ export class GuardCore {
       sessionId: readString(record.sessionId ?? record.session_id) ?? this.config.scope?.sessionId,
     };
   }
+
+  private warnApproximateTokens(model: string, scopeKey: string): void {
+    const warningKey = `${model}:${scopeKey}`;
+    if (this.approximateTokenWarnings.has(warningKey)) return;
+
+    this.approximateTokenWarnings.add(warningKey);
+    console.warn(
+      `[ai-costguard] Using approximate token counting for model: ${model}. ` +
+        'Register an exact tokenizer via registerTokenizer() for production use.'
+    );
+  }
 }
 
 /**
@@ -458,6 +484,20 @@ function hydrateScopeState(state: GuardScopeState): void {
   state.blockedCount ??= 0;
   state.recentPrompts ??= [];
   state.recentRetries ??= [];
+}
+
+function validateLoopConfig(similarityThreshold: number, minHistorySize: number, windowSize: number): void {
+  if (!Number.isFinite(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 1) {
+    throw new Error('loopDetection.similarityThreshold must be between 0 and 1');
+  }
+
+  if (!Number.isFinite(minHistorySize) || minHistorySize < 1) {
+    throw new Error('loopDetection.minHistorySize must be at least 1');
+  }
+
+  if (!Number.isFinite(windowSize) || windowSize < 1) {
+    throw new Error('loopDetection.windowSize must be at least 1');
+  }
 }
 
 function createEmptyContext(): RequestContext {

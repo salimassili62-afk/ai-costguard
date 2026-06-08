@@ -75,6 +75,6 @@ test('GuardPro falls back to local state when Redis fails', async () => {
   await assert.rejects(() => guard.checkAndCharge('project-b', 0.02), /exceeded budget/);
 });
 
-test('GuardPro factory creates guards without license compatibility stubs', () => {
+test('GuardPro factory creates guards', () => {
   assert.ok(getProGuard({ redisUrl: 'redis://unit', budget: 1 }) instanceof GuardPro);
 });

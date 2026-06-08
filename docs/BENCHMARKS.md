@@ -34,13 +34,13 @@ npm run benchmark:tokens
 
 Current local run:
 
-- Date: `2026-06-08T13:03:42.459Z`
+- Date: `2026-06-08T19:54:52.399Z`
 - Node: `v24.14.1`
 - Platform: `win32`
 - Iterations: `5000`
-- Direct mocked async call: `0.000310 ms/call`
-- Guarded mocked async call: `0.021001 ms/call`
-- Added overhead: `0.020691 ms/call`
+- Direct mocked async call: `0.000409 ms/call`
+- Guarded mocked async call: `0.024346 ms/call`
+- Added overhead: `0.023937 ms/call`
 - Benign repeated "again" prompts blocked: `0`
 - Repeated loop prompt blocked at step: `3`
 - GC exposed for memory run: `false`
@@ -53,13 +53,13 @@ Generated benchmark output is intentionally not published in the npm package. Re
 
 Current fixed-corpus token accuracy run:
 
-- Reference: `gpt-tokenizer cl100k_base` fixture counts
-- Samples: `8`
-- Average error: `259.08%`
-- Median error: `263.98%`
-- Max error: `323.53%`
+- Reference: dependency-free fixed proxy fixture counts, not a live provider tokenizer
+- Samples: `24`
+- Average error: `237.76%`
+- Median error: `240.06%`
+- Max error: `390%`
 
-This shows the current dependency-free estimator is conservative and materially overestimates this corpus. Treat AI CostGuard estimates as pre-call guardrails, not exact provider tokenizer counts.
+This shows the current dependency-free estimator is conservative and materially overestimates this proxy corpus. Treat AI CostGuard estimates as pre-call guardrails, not exact provider tokenizer counts. For production budgets that need tighter input-token estimates, register an exact tokenizer with `registerTokenizer()`.
 
 ## Interpreting Results
 

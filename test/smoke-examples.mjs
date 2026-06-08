@@ -17,7 +17,6 @@ assert.equal(root.GuardPro, undefined);
 
 const pro = await import('../dist/pro.js');
 assert.equal(typeof pro.GuardPro, 'function');
-assert.equal(pro.validateLicense, undefined);
 
 for (const file of walkFiles(['examples', 'templates', 'landing', 'docs'])) {
   const content = readFileSync(file, 'utf8');

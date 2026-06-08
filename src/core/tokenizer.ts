@@ -46,6 +46,38 @@ const BPE_RANKS = new Map<string, number>(
 );
 
 /**
+ * User-supplied tokenizer function for a model family.
+ */
+export type TokenizerFn = (text: string) => number;
+
+interface RegisteredTokenizer {
+  pattern: string | RegExp;
+  fn: TokenizerFn;
+}
+
+interface TokenEstimate {
+  tokens: number;
+  approximate: boolean;
+}
+
+const registeredTokenizers: RegisteredTokenizer[] = [];
+
+/**
+ * Registers an exact or provider-specific tokenizer for matching model names.
+ */
+export function registerTokenizer(modelPattern: string | RegExp, fn: TokenizerFn): void {
+  if (!(typeof modelPattern === 'string' && modelPattern.trim()) && !(modelPattern instanceof RegExp)) {
+    throw new Error('registerTokenizer modelPattern must be a non-empty string or RegExp');
+  }
+
+  if (typeof fn !== 'function') {
+    throw new Error('registerTokenizer fn must be a function');
+  }
+
+  registeredTokenizers.push({ pattern: modelPattern, fn });
+}
+
+/**
  * Estimates tokens for a plain text string using a small inline BPE approximation.
  */
 export function estimateTokensFromText(input: string): number {
@@ -81,11 +113,14 @@ export function estimateRequestTokens(params: unknown): {
   outputTokens: number;
   tokens: number;
   prompt: string;
+  approximate: boolean;
 } {
   const record = isRecord(params) ? params : {};
   const prompt = extractPrompt(record);
+  const model = typeof record.model === 'string' ? record.model : undefined;
   const modelOverhead = Array.isArray(record.messages) ? record.messages.length * 3 + 3 : 0;
-  const inputTokens = estimateTokensFromText(prompt) + modelOverhead;
+  const tokenEstimate = estimateTokensForModel(model, prompt);
+  const inputTokens = tokenEstimate.tokens + modelOverhead;
   const outputTokens = readPositiveNumber(record.max_tokens) ??
     readPositiveNumber(record.max_completion_tokens) ??
     readPositiveNumber(record.maxTokens) ??
@@ -97,7 +132,28 @@ export function estimateRequestTokens(params: unknown): {
     outputTokens,
     tokens: inputTokens + outputTokens,
     prompt,
+    approximate: tokenEstimate.approximate,
   };
+}
+
+/**
+ * Estimates text tokens using a registered tokenizer when one matches the model.
+ */
+export function estimateTokensForModel(model: string | undefined, text: string): TokenEstimate {
+  const tokenizer = model ? findTokenizer(model) : undefined;
+
+  if (tokenizer) {
+    try {
+      const tokens = tokenizer.fn(text);
+      if (Number.isFinite(tokens) && tokens >= 0) {
+        return { tokens: Math.max(0, Math.ceil(tokens)), approximate: false };
+      }
+    } catch {
+      // Fall through to the approximation. GuardCore emits one warning per model/scope.
+    }
+  }
+
+  return { tokens: estimateTokensFromText(text), approximate: true };
 }
 
 function estimatePieceTokens(piece: string): number {
@@ -145,6 +201,19 @@ function extractPrompt(record: Record<string, unknown>): string {
   }
 
   return extractText(record.prompt ?? record.input ?? record.content ?? record.message);
+}
+
+function findTokenizer(model: string): RegisteredTokenizer | undefined {
+  const normalizedModel = model.trim().toLowerCase();
+
+  return registeredTokenizers.find((tokenizer) => {
+    if (typeof tokenizer.pattern === 'string') {
+      return normalizedModel.includes(tokenizer.pattern.trim().toLowerCase());
+    }
+
+    tokenizer.pattern.lastIndex = 0;
+    return tokenizer.pattern.test(model);
+  });
 }
 
 function readPositiveNumber(value: unknown): number | undefined {

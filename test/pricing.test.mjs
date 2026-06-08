@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { BUILTIN_PRICING_LAST_UPDATED, getPricing, listPricing, registerPricing } from '../dist/index.js';
+import { BUILTIN_PRICING_LAST_UPDATED, getPricing, getPricingMeta, listPricing, registerPricing } from '../dist/index.js';
 
 test('pricing resolves exact, fuzzy, runtime, and override entries', () => {
   assert.equal(BUILTIN_PRICING_LAST_UPDATED, '2026-06-07');
@@ -35,6 +35,15 @@ test('pricing resolves exact, fuzzy, runtime, and override entries', () => {
 
   assert.equal(override?.inputPer1kTokens, 1);
   assert.ok(listPricing().some((entry) => entry.model === 'unit-runtime-model'));
+});
+
+test('pricing metadata reports freshness for resolved models', () => {
+  const meta = getPricingMeta('gpt-4o-mini');
+
+  assert.equal(meta?.pricing.model, 'gpt-4o-mini');
+  assert.equal(meta?.registryLastUpdated, BUILTIN_PRICING_LAST_UPDATED);
+  assert.equal(typeof meta?.ageDays, 'number');
+  assert.equal(typeof meta?.stale, 'boolean');
 });
 
 test('pricing warns once for stale entries older than 30 days', () => {

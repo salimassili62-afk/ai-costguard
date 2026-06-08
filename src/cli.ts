@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { getPricing } from './pricing/index.js';
+import { getPricing, listPricing } from './pricing/index.js';
 import {
   formatDashboardSummary,
   getDefaultEventLogPath,
@@ -45,6 +45,14 @@ export interface CliCheckOptions {
 export interface CliDashboardOptions extends DashboardOptions {
   once: boolean;
   json: boolean;
+}
+
+/**
+ * Parsed options for the pricing freshness command.
+ */
+export interface CliPricingOptions {
+  checkStale: boolean;
+  days: number;
 }
 
 /**
@@ -116,6 +124,42 @@ export function parseDashboardArgs(args: readonly string[]): CliDashboardOptions
 }
 
 /**
+ * Parses arguments for `aifw pricing`.
+ */
+export function parsePricingArgs(args: readonly string[]): CliPricingOptions {
+  const options = new Map<string, string>();
+  const flags = new Set<string>();
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (!arg.startsWith('--')) continue;
+
+    const key = arg.slice(2);
+    if (key === 'check-stale') {
+      flags.add(key);
+      continue;
+    }
+
+    const value = args[index + 1];
+    if (!value || value.startsWith('--')) {
+      throw new Error(`Missing value for --${key}`);
+    }
+
+    options.set(key, value);
+    index += 1;
+  }
+
+  if (!flags.has('check-stale')) {
+    throw new Error('aifw pricing currently supports --check-stale');
+  }
+
+  return {
+    checkStale: true,
+    days: readOptionalNumber(options, 'days') ?? 30,
+  };
+}
+
+/**
  * Runs the aifw CLI and returns a process exit code.
  */
 export function runCli(args: readonly string[] = process.argv.slice(2), io: CliIO = defaultIO): number {
@@ -126,7 +170,7 @@ export function runCli(args: readonly string[] = process.argv.slice(2), io: CliI
     return 0;
   }
 
-  if (command !== 'check' && command !== 'dashboard') {
+  if (command !== 'check' && command !== 'dashboard' && command !== 'pricing') {
     io.stderr(`Unknown command: ${command}\n\n${helpText()}`);
     return 2;
   }
@@ -147,8 +191,41 @@ export function runCli(args: readonly string[] = process.argv.slice(2), io: CliI
         .catch((error: unknown) => {
           io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
           process.exitCode = 2;
-        });
+      });
       return 0;
+    }
+
+    if (command === 'pricing') {
+      const options = parsePricingArgs(args.slice(1));
+      const entries = listPricing()
+        .map((entry) => {
+          const ageDays = getPricingAgeDays(entry.lastUpdated);
+          return {
+            model: entry.model,
+            lastUpdated: entry.lastUpdated,
+            source: entry.source,
+            ageDays,
+            stale: ageDays > options.days,
+          };
+        })
+        .sort((a, b) => a.model.localeCompare(b.model));
+      const staleCount = entries.filter((entry) => entry.stale).length;
+
+      io.stdout(
+        JSON.stringify(
+          {
+            ok: staleCount === 0,
+            checkedAt: new Date().toISOString(),
+            thresholdDays: options.days,
+            staleCount,
+            entries,
+          },
+          null,
+          2
+        ) + '\n'
+      );
+
+      return staleCount === 0 ? 0 : 1;
     }
 
     const options = parseCheckArgs(args.slice(1));
@@ -234,6 +311,7 @@ function helpText(): string {
   return [
     'Usage:',
     '  aifw check --budget <usd> --model <model> --tokens <output-tokens> --max-steps <n>',
+    '  aifw pricing --check-stale --days 30',
     '  aifw dashboard --events .ai-costguard/events.jsonl --budget <usd>',
     '  ai-costguard dashboard --once --json',
     '',
@@ -244,6 +322,13 @@ function helpText(): string {
     '  Exit code 0 means projected cost is within budget; 1 means over budget; 2 means usage/config error.',
     '',
   ].join('\n');
+}
+
+function getPricingAgeDays(lastUpdated: string): number {
+  const lastUpdatedMs = Date.parse(`${lastUpdated}T00:00:00.000Z`);
+  if (!Number.isFinite(lastUpdatedMs)) return Number.POSITIVE_INFINITY;
+
+  return Math.max(0, Math.floor((Date.now() - lastUpdatedMs) / 86_400_000));
 }
 
 function readOptionalString(options: Map<string, string>, key: string): string | undefined {

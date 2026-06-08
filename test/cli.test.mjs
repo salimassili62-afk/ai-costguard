@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { parseCheckArgs, parseDashboardArgs, runCli } from '../dist/cli.js';
+import { parseCheckArgs, parseDashboardArgs, parsePricingArgs, runCli } from '../dist/cli.js';
 
 test('CLI parses check arguments', () => {
   assert.deepEqual(
@@ -161,4 +161,27 @@ test('CLI dashboard summarizes local JSONL events without starting a server', ()
   assert.equal(summary.requestsBlocked, 1);
   assert.equal(summary.loopDetections, 1);
   assert.equal(summary.estimatedSavingsUsd, 0.002);
+});
+
+test('CLI parses pricing freshness arguments', () => {
+  assert.deepEqual(parsePricingArgs(['--check-stale', '--days', '90']), {
+    checkStale: true,
+    days: 90,
+  });
+});
+
+test('CLI pricing freshness check emits registry metadata', () => {
+  let stdout = '';
+  const code = runCli(['pricing', '--check-stale', '--days', '9999'], {
+    stdout: (message) => {
+      stdout += message;
+    },
+    stderr: () => undefined,
+  });
+
+  const result = JSON.parse(stdout);
+  assert.equal(code, 0);
+  assert.equal(result.ok, true);
+  assert.equal(result.thresholdDays, 9999);
+  assert.ok(result.entries.some((entry) => entry.model === 'gpt-4o-mini'));
 });

@@ -9,7 +9,8 @@ This document describes the implementation that ships in `@salimassili/ai-costgu
   - `guardFunction`
   - `GuardError`
   - `middleware`
-  - pricing helpers
+  - pricing helpers, including `getPricingMeta`
+  - `registerTokenizer`
   - public config/event/context types
 - Pro import: `@salimassili/ai-costguard/pro`
   - `GuardPro`
@@ -73,7 +74,7 @@ Budget enforcement uses estimated allowed spend because the decision happens bef
 
 ## Behavior Detection
 
-Loop detection uses character trigram cosine similarity. A prompt is blocked when at least `loopMinRepeats` recent prompts in the same scope exceed `loopSimilarityThreshold`.
+Loop detection uses character trigram cosine similarity. A prompt is blocked when at least `loopDetection.minHistorySize` recent prompts in the same scope exceed `loopDetection.similarityThreshold` inside the configured `loopDetection.windowSize`. Legacy `loopSimilarityThreshold` and `loopMinRepeats` options are still accepted for compatibility.
 
 Retry detection uses conservative retry/failure keywords and scoped retry history. It is heuristic and intentionally configurable.
 

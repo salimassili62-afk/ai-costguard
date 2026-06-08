@@ -152,8 +152,11 @@ guard(client, {
   behaviorAnalysis: true,
   maxHistory: 32,
   historyTtlMs: 5 * 60 * 1000,
-  loopSimilarityThreshold: 0.85,
-  loopMinRepeats: 2,
+  loopDetection: {
+    similarityThreshold: 0.85,
+    minHistorySize: 2,
+    windowSize: 5,
+  },
   retryThreshold: 2,
   scope: {
     projectId: 'production-api',
@@ -177,23 +180,32 @@ guard(client, {
 
 ## Loop Detection Tuning
 
-Default loop detection uses character trigram cosine similarity with `loopSimilarityThreshold: 0.85` and `loopMinRepeats: 2`.
+Default loop detection uses character trigram cosine similarity with:
+
+- `loopDetection.similarityThreshold: 0.85`
+- `loopDetection.minHistorySize: 2`
+- `loopDetection.windowSize: 5`
 
 - Higher threshold, such as `0.95`: fewer false positives, but near-duplicate loops can slip through.
 - Lower threshold, such as `0.75`: catches looser repeats, but unrelated prompts can be blocked.
-- Higher `loopMinRepeats`: waits for more repeated prompts before blocking.
-- Lower `loopMinRepeats`: blocks faster, but is more aggressive.
+- Higher `minHistorySize`: waits for more repeated prompts before blocking.
+- Lower `minHistorySize`: blocks faster, but is more aggressive.
+- Smaller `windowSize`: compares fewer recent prompts, reducing old-history false positives.
+- Larger `windowSize`: compares more history, improving catch rate but increasing false-positive risk in repetitive workflows.
 
 ```ts
 const openai = guard(client, {
   budget: 5,
-  loopSimilarityThreshold: 0.9,
-  loopMinRepeats: 3,
+  loopDetection: {
+    similarityThreshold: 0.9,
+    minHistorySize: 3,
+    windowSize: 6,
+  },
   scope: { sessionId: 'agent-run-123' },
 });
 ```
 
-Loop detection is heuristic. Expect false positives and false negatives, especially for short prompts, templated prompts, and prompts that share a lot of boilerplate.
+Legacy `loopSimilarityThreshold` and `loopMinRepeats` config fields are still accepted, but `loopDetection` takes precedence. Loop detection is heuristic. Expect false positives and false negatives, especially for short prompts, templated prompts, and prompts that share a lot of boilerplate.
 
 ## Accounting Semantics
 
@@ -213,7 +225,7 @@ Known model pricing comes from built-in registry entries, runtime registrations,
 Pricing last updated: `2026-06-07`. Provider pricing changes; AI CostGuard does not fetch real-time pricing. Override pricing manually when provider pages or your contract pricing differ from the built-ins.
 
 ```ts
-import { registerPricing } from '@salimassili/ai-costguard';
+import { getPricingMeta, registerPricing } from '@salimassili/ai-costguard';
 
 registerPricing([
   {
@@ -224,7 +236,17 @@ registerPricing([
     source: 'internal',
   },
 ]);
+
+console.log(getPricingMeta('gpt-4o-mini'));
 ```
+
+Check built-in pricing freshness from CI or a release script:
+
+```bash
+aifw pricing --check-stale --days 30
+```
+
+The command exits `0` when all registry entries are within the threshold and `1` when one or more entries are stale.
 
 If you intentionally want fallback pricing for unknown models:
 
@@ -243,6 +265,30 @@ guard(client, {
 ```
 
 Pricing changes frequently. Verify provider pricing before production use and override entries when needed.
+
+## Token Counting Accuracy
+
+AI CostGuard ships with a dependency-free token estimator so the root package stays small. It warns once per model/scope when approximate counting is used:
+
+```text
+[ai-costguard] Using approximate token counting for model: gpt-4o-mini. Register an exact tokenizer via registerTokenizer() for production use.
+```
+
+For production budgets that need tighter input-token estimates, register a provider tokenizer:
+
+```ts
+import { registerTokenizer } from '@salimassili/ai-costguard';
+
+registerTokenizer('gpt-4o-mini', (text) => {
+  return myTokenizer.encode(text).length;
+});
+
+registerTokenizer(/^claude-/u, (text) => {
+  return myAnthropicTokenizer.count(text);
+});
+```
+
+String patterns match model-name substrings case-insensitively. `RegExp` patterns are tested against the original model string. If a registered tokenizer throws or returns an invalid count, AI CostGuard falls back to the built-in approximation and keeps guarding the call.
 
 ## Events
 
@@ -392,9 +438,9 @@ npm run benchmark
 
 The script reports runtime overhead, approximate heap delta, false-positive scenarios, loop detection behavior, and cost-estimation boundaries. Results are local measurements, not universal guarantees. See `docs/BENCHMARKS.md`.
 
-Latest local benchmark in this repo on Node `v24.14.1` / Windows measured `0.020691 ms` added per mocked guarded call over `5000` iterations. Re-run on your target runtime before using this number in performance-sensitive claims.
+Latest local benchmark in this repo on Node `v24.14.1` / Windows measured `0.023937 ms` added per mocked guarded call over `5000` iterations. Re-run on your target runtime before using this number in performance-sensitive claims.
 
-Token accuracy benchmark, fixed corpus, `gpt-tokenizer cl100k_base` fixture counts: average error `259.08%`, median error `263.98%`, max error `323.53%`, `8` samples. The current estimator is conservative and can substantially overestimate short prompts. Use this package as a pre-call guardrail, not an exact tokenizer.
+Token accuracy benchmark, fixed proxy corpus: average error `237.76%`, median error `240.06%`, max error `390%`, `24` samples. The current dependency-free estimator is conservative and can substantially overestimate short prompts. Register an exact tokenizer for production use when token accuracy matters.
 
 ## Why Not 50 Lines Of Code?
 
@@ -419,13 +465,14 @@ npm run typecheck
 npm test
 npm run smoke
 npm run benchmark
+npm run benchmark:tokens
 npm audit --omit=dev
 npm pack --dry-run
 ```
 
 ## Limitations
 
-- Token counting is approximate and dependency-free.
+- Token counting is approximate and dependency-free unless you register an exact tokenizer.
 - Token estimation is intentionally conservative and can overestimate materially; see the token accuracy benchmark.
 - Pricing entries can become stale; override them for production.
 - The free guard is process-local.

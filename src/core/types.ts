@@ -54,6 +54,15 @@ export interface GuardConfig {
   loopSimilarityThreshold?: number;
   /** Number of prior similar prompts required before loop blocking. Defaults to 2. */
   loopMinRepeats?: number;
+  /** Structured loop detection tuning. Takes precedence over legacy loopSimilarityThreshold/loopMinRepeats. */
+  loopDetection?: {
+    /** Similarity threshold from 0 to 1. Defaults to 0.85. */
+    similarityThreshold?: number;
+    /** Number of prior similar prompts required before loop blocking. Defaults to 2. */
+    minHistorySize?: number;
+    /** Number of recent prompts compared for loop detection. Defaults to 5. */
+    windowSize?: number;
+  };
   /** Number of retry/failure prompts allowed before a retry storm is blocked. Defaults to 2. */
   retryThreshold?: number;
   /** Known AI SDK method paths to guard. Defaults to common OpenAI/Anthropic create methods. */
@@ -92,6 +101,8 @@ export interface RequestContext {
   tokens: number;
   /** Estimated input tokens. */
   inputTokens?: number;
+  /** True when dependency-free approximate token counting was used. */
+  approximateTokens?: boolean;
   /** Reserved or requested output tokens. */
   outputTokens?: number;
   /** Estimated USD cost for the request. */

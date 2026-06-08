@@ -25,6 +25,20 @@ export interface ModelPricing {
   source: string;
 }
 
+/**
+ * Freshness metadata for the pricing entry resolved for a model.
+ */
+export interface PricingMeta {
+  /** Pricing entry selected for the requested model. */
+  pricing: ModelPricing;
+  /** Last manual verification date for the built-in registry. */
+  registryLastUpdated: string;
+  /** Age of the selected pricing entry in whole days. */
+  ageDays: number;
+  /** True when the selected pricing entry is older than the stale-pricing threshold. */
+  stale: boolean;
+}
+
 const BUILTIN_PRICING: readonly ModelPricing[] = [
   {
     model: 'gpt-5.5',
@@ -169,6 +183,21 @@ export function registerPricing(entries: readonly ModelPricing[]): void {
 }
 
 /**
+ * Returns freshness metadata for the pricing entry resolved for a model.
+ */
+export function getPricingMeta(model: string, overrides: readonly ModelPricing[] = []): PricingMeta | undefined {
+  const pricing = getPricing(model, overrides);
+  if (!pricing) return undefined;
+
+  return {
+    pricing,
+    registryLastUpdated: BUILTIN_PRICING_LAST_UPDATED,
+    ageDays: getPricingAgeDays(pricing),
+    stale: isPricingStale(pricing, STALE_PRICING_DAYS),
+  };
+}
+
+/**
  * Lists built-in and runtime pricing entries, deduplicated by normalized model name.
  */
 export function listPricing(): ModelPricing[] {
@@ -212,17 +241,24 @@ function warnIfAnyStale(entries: Iterable<ModelPricing>): void {
 }
 
 function warnIfStale(entry: ModelPricing): void {
-  const lastUpdatedMs = Date.parse(`${entry.lastUpdated}T00:00:00.000Z`);
-  if (!Number.isFinite(lastUpdatedMs)) return;
-
-  const ageDays = (Date.now() - lastUpdatedMs) / 86_400_000;
   const warningKey = `${normalizeModel(entry.model)}:${entry.lastUpdated}`;
 
-  if (ageDays > STALE_PRICING_DAYS && !staleWarnings.has(warningKey)) {
+  if (isPricingStale(entry, STALE_PRICING_DAYS) && !staleWarnings.has(warningKey)) {
     staleWarnings.add(warningKey);
     console.warn(
       `[AI CostGuard] Pricing for "${entry.model}" is older than ${STALE_PRICING_DAYS} days. ` +
         `Last checked ${entry.lastUpdated}; verify ${entry.source}.`
     );
   }
+}
+
+function getPricingAgeDays(entry: ModelPricing): number {
+  const lastUpdatedMs = Date.parse(`${entry.lastUpdated}T00:00:00.000Z`);
+  if (!Number.isFinite(lastUpdatedMs)) return Number.POSITIVE_INFINITY;
+
+  return Math.max(0, Math.floor((Date.now() - lastUpdatedMs) / 86_400_000));
+}
+
+function isPricingStale(entry: ModelPricing, staleAfterDays: number): boolean {
+  return getPricingAgeDays(entry) > staleAfterDays;
 }
