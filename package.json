@@ -8,8 +8,8 @@
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "bin": {
-    "aifw": "./dist/cli.js",
-    "ai-costguard": "./dist/cli.js"
+    "aifw": "dist/cli.js",
+    "ai-costguard": "dist/cli.js"
   },
   "exports": {
     ".": {
