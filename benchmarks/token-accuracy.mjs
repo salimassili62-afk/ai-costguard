@@ -1,4 +1,4 @@
-import { estimateTokensFromText } from '../dist/core/tokenizer.js';
+import { estimateTokensForModel } from '../dist/core/tokenizer.js';
 
 const corpus = [
   { label: 'short english', text: 'Summarize this ticket.', referenceTokens: 5 },
@@ -100,6 +100,7 @@ const corpus = [
   },
   {
     label: 'anthropic workflow',
+    model: 'claude-sonnet-4.6',
     text:
       'Claude should inspect the document, call the classifier once, and stop if confidence is below 0.7.',
     referenceTokens: 21,
@@ -123,12 +124,13 @@ const corpus = [
 ];
 
 const samples = corpus.map((sample) => {
-  const estimatedTokens = estimateTokensFromText(sample.text);
+  const estimatedTokens = estimateTokensForModel(sample.model, sample.text).tokens;
   const absoluteError = Math.abs(estimatedTokens - sample.referenceTokens);
   const percentError = (absoluteError / sample.referenceTokens) * 100;
 
   return {
     label: sample.label,
+    model: sample.model ?? 'default-gpt-family',
     estimatedTokens,
     referenceTokens: sample.referenceTokens,
     absoluteError,

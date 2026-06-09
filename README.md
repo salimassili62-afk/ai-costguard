@@ -440,7 +440,7 @@ The script reports runtime overhead, approximate heap delta, false-positive scen
 
 Latest local benchmark in this repo on Node `v24.14.1` / Windows measured `0.023937 ms` added per mocked guarded call over `5000` iterations. Re-run on your target runtime before using this number in performance-sensitive claims.
 
-Token accuracy benchmark, fixed proxy corpus: average error `237.76%`, median error `240.06%`, max error `390%`, `24` samples. The current dependency-free estimator is conservative and can substantially overestimate short prompts. Register an exact tokenizer for production use when token accuracy matters.
+Token accuracy benchmark, fixed proxy corpus: average error `9.68%`, median error `11.43%`, max error `28.57%`, `24` samples. The dependency-free estimator is a rough guardrail, not provider-tokenizer parity. Register an exact tokenizer for production use when token accuracy matters.
 
 ## Why Not 50 Lines Of Code?
 

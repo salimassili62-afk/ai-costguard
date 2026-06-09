@@ -1,6 +1,13 @@
 # Changelog
 
-## 2.1.0 - Unreleased
+## 2.1.1 - Unreleased
+
+### Changed
+
+- Recalibrated the built-in zero-dependency token estimator with simple model-family and text-shape heuristics.
+- Improved the fixed proxy token benchmark from `237.76%` average error to `9.68%` average error while keeping `registerTokenizer()` as the recommended exact-counting path.
+
+## 2.1.0 - 2026-06-09
 
 ### Added
 

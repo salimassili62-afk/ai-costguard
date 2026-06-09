@@ -3,12 +3,15 @@ import { test } from 'node:test';
 
 import { GuardCore, GuardError } from '../dist/core/GuardCore.js';
 import { cosineSimilarity } from '../dist/core/similarity.js';
-import { estimateTokensFromText, estimateRequestTokens } from '../dist/core/tokenizer.js';
+import { estimateTokensForModel, estimateTokensFromText, estimateRequestTokens } from '../dist/core/tokenizer.js';
 import { registerTokenizer } from '../dist/index.js';
 
-test('token estimator uses inline BPE-style pieces instead of character/4 heuristic', () => {
-  assert.equal(estimateTokensFromText('hello'), 3);
-  assert.notEqual(estimateTokensFromText('hello'), Math.ceil('hello'.length / 4));
+test('token estimator calibrates normal English without extreme overestimation', () => {
+  const estimate = estimateTokensForModel('gpt-4o-mini', 'Summarize this support ticket in two bullets.');
+
+  assert.equal(estimate.approximate, true);
+  assert.ok(estimate.tokens >= 8);
+  assert.ok(estimate.tokens <= 12);
 
   const request = estimateRequestTokens({
     messages: [{ role: 'user', content: 'hello world' }],
@@ -18,6 +21,31 @@ test('token estimator uses inline BPE-style pieces instead of character/4 heuris
   assert.equal(request.outputTokens, 10);
   assert.ok(request.inputTokens > 3);
   assert.equal(request.tokens, request.inputTokens + 10);
+});
+
+test('token estimator calibrates code, structured payloads, Claude-family, and unknown models', () => {
+  const code = estimateTokensForModel(
+    'gpt-4o-mini',
+    'function normalizeUser(user) { return { id: user.id, email: user.email?.toLowerCase() }; }'
+  );
+  const json = estimateTokensForModel(
+    'gpt-4o-mini',
+    '{"model":"gpt-4o-mini","max_tokens":400,"tools":[{"name":"search","strict":true}]}'
+  );
+  const claude = estimateTokensForModel(
+    'claude-sonnet-4.6',
+    'Claude should inspect the document, call the classifier once, and stop if confidence is below 0.7.'
+  );
+  const gptForSameText = estimateTokensForModel(
+    'gpt-4o-mini',
+    'Claude should inspect the document, call the classifier once, and stop if confidence is below 0.7.'
+  );
+  const unknown = estimateTokensForModel(undefined, 'Summarize this ticket.');
+
+  assert.ok(code.tokens >= 20 && code.tokens <= 30);
+  assert.ok(json.tokens >= 20 && json.tokens <= 30);
+  assert.ok(claude.tokens > gptForSameText.tokens);
+  assert.equal(unknown.tokens, estimateTokensFromText('Summarize this ticket.'));
 });
 
 test('registered tokenizers override prompt token estimation by model string pattern', () => {

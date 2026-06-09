@@ -55,11 +55,11 @@ Current fixed-corpus token accuracy run:
 
 - Reference: dependency-free fixed proxy fixture counts, not a live provider tokenizer
 - Samples: `24`
-- Average error: `237.76%`
-- Median error: `240.06%`
-- Max error: `390%`
+- Average error: `9.68%`
+- Median error: `11.43%`
+- Max error: `28.57%`
 
-This shows the current dependency-free estimator is conservative and materially overestimates this proxy corpus. Treat AI CostGuard estimates as pre-call guardrails, not exact provider tokenizer counts. For production budgets that need tighter input-token estimates, register an exact tokenizer with `registerTokenizer()`.
+This shows the calibrated dependency-free estimator is much closer on this proxy corpus. Treat AI CostGuard estimates as pre-call guardrails, not exact provider tokenizer counts. For production budgets that need tighter input-token estimates, register an exact tokenizer with `registerTokenizer()`.
 
 ## Interpreting Results
 

@@ -1,49 +1,17 @@
-const TOKEN_PATTERN =
-  /'s|'t|'re|'ve|'m|'ll|'d| ?[\p{L}]+| ?\p{N}{1,3}| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+/gu;
+const WORD_PATTERN = /[\p{L}\p{N}_]+/gu;
+const LETTER_PATTERN = /\p{L}/gu;
+const ASCII_LETTER_PATTERN = /[A-Za-z]/g;
+const SYMBOL_PATTERN = /[^\s\p{L}\p{N}]/gu;
 
-const BPE_RANKS = new Map<string, number>(
-  [
-    't h',
-    'h e',
-    'i n',
-    'e r',
-    'a n',
-    'r e',
-    'o n',
-    'a t',
-    'e n',
-    'n d',
-    's t',
-    'o r',
-    'a l',
-    'i t',
-    'i s',
-    't i',
-    'n g',
-    'c o',
-    'd e',
-    'l l',
-    'm e',
-    'p r',
-    'o m',
-    'p t',
-    'r e',
-    'e s',
-    's i',
-    'o u',
-    'a r',
-    'a i',
-    'g p',
-    'p t',
-    'c l',
-    'a u',
-    'u d',
-    'd e',
-    'm o',
-    'o d',
-    'e l',
-  ].map((pair, index) => [pair, index])
-);
+type TextShape = 'normal' | 'structured' | 'code' | 'markdown' | 'multilingual' | 'repetitive';
+
+interface TextStats {
+  charCount: number;
+  wordCount: number;
+  symbolRatio: number;
+  nonLatinLetterRatio: number;
+  repeatedWordRatio: number;
+}
 
 /**
  * User-supplied tokenizer function for a model family.
@@ -78,15 +46,10 @@ export function registerTokenizer(modelPattern: string | RegExp, fn: TokenizerFn
 }
 
 /**
- * Estimates tokens for a plain text string using a small inline BPE approximation.
+ * Estimates tokens for a plain text string using a calibrated dependency-free approximation.
  */
 export function estimateTokensFromText(input: string): number {
-  if (input.length === 0) return 0;
-
-  const pieces = input.match(TOKEN_PATTERN) ?? [];
-  const count = pieces.reduce((total, piece) => total + estimatePieceTokens(piece), 0);
-
-  return Math.max(1, count);
+  return estimateApproximateTokens(undefined, input);
 }
 
 /**
@@ -153,43 +116,87 @@ export function estimateTokensForModel(model: string | undefined, text: string):
     }
   }
 
-  return { tokens: estimateTokensFromText(text), approximate: true };
+  return { tokens: estimateApproximateTokens(model, text), approximate: true };
 }
 
-function estimatePieceTokens(piece: string): number {
-  if (/^\s+$/u.test(piece)) return 1;
-  if (/^\p{N}{1,3}$/u.test(piece.trim())) return 1;
+function estimateApproximateTokens(model: string | undefined, input: string): number {
+  const text = input.normalize('NFKC');
+  const stats = inspectText(text);
+  if (stats.charCount === 0) return 0;
 
-  const normalized = piece.normalize('NFKC');
-  if (/^[\p{P}\p{S}\s]+$/u.test(normalized)) {
-    return Math.max(1, Math.ceil([...normalized].length / 2));
-  }
+  const shape = detectTextShape(text, stats);
+  let estimate = stats.charCount / getCharsPerToken(model, shape);
 
-  const symbols = applyApproximateBpe([...normalized.toLowerCase()]);
-  return Math.max(1, symbols.length);
+  if (shape === 'normal') estimate = Math.max(estimate, stats.wordCount * 1.1);
+  if (shape === 'structured') estimate = Math.max(estimate, stats.wordCount * 1.75);
+  if (shape === 'code') estimate = Math.max(estimate, stats.wordCount * 1.55);
+  if (shape === 'markdown') estimate = Math.max(estimate, stats.wordCount * 1.45);
+  if (shape === 'multilingual') estimate = Math.max(estimate, stats.wordCount * 1.7);
+  if (shape === 'repetitive') estimate = Math.max(stats.wordCount, estimate);
+
+  return Math.max(1, Math.ceil(estimate));
 }
 
-function applyApproximateBpe(initialSymbols: string[]): string[] {
-  const symbols = [...initialSymbols];
+function inspectText(text: string): TextStats {
+  const words = text.match(WORD_PATTERN) ?? [];
+  const letters = text.match(LETTER_PATTERN) ?? [];
+  const asciiLetters = text.match(ASCII_LETTER_PATTERN) ?? [];
+  const symbols = text.match(SYMBOL_PATTERN) ?? [];
+  const normalizedWords = words.map((word) => word.toLowerCase());
+  const uniqueWords = new Set(normalizedWords);
 
-  while (symbols.length > 1) {
-    let bestIndex = -1;
-    let bestRank = Number.POSITIVE_INFINITY;
+  return {
+    charCount: [...text].length,
+    wordCount: words.length,
+    symbolRatio: symbols.length / Math.max(1, [...text].length),
+    nonLatinLetterRatio: letters.length === 0 ? 0 : (letters.length - asciiLetters.length) / letters.length,
+    repeatedWordRatio: words.length === 0 ? 1 : uniqueWords.size / words.length,
+  };
+}
 
-    for (let index = 0; index < symbols.length - 1; index++) {
-      const rank = BPE_RANKS.get(`${symbols[index]} ${symbols[index + 1]}`);
-      if (rank !== undefined && rank < bestRank) {
-        bestRank = rank;
-        bestIndex = index;
-      }
-    }
+function detectTextShape(text: string, stats: TextStats): TextShape {
+  const trimmed = text.trim();
 
-    if (bestIndex === -1) break;
+  if (stats.wordCount >= 6 && stats.repeatedWordRatio <= 0.35) return 'repetitive';
+  if (looksLikeJson(trimmed) || looksLikeStructuredPayload(text)) return 'structured';
+  if (/(^|\n)\s*[-*]\s|^#{1,6}\s/mu.test(text)) return 'markdown';
+  if (looksCodeHeavy(text, stats)) return 'code';
+  if (stats.nonLatinLetterRatio > 0.25) return 'multilingual';
 
-    symbols.splice(bestIndex, 2, `${symbols[bestIndex]}${symbols[bestIndex + 1]}`);
+  return 'normal';
+}
+
+function getCharsPerToken(model: string | undefined, shape: TextShape): number {
+  if (shape === 'repetitive') return 5.8;
+  if (shape === 'structured') return 3;
+  if (shape === 'code') return 3.4;
+  if (shape === 'markdown') return 3.8;
+  if (shape === 'multilingual') return 3.1;
+  if (model?.toLowerCase().includes('claude')) return 3.7;
+  return 4.8;
+}
+
+function looksLikeJson(text: string): boolean {
+  if (!((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']')))) return false;
+
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeStructuredPayload(text: string): boolean {
+  return /tool_call|request_id|retry_after|--[\w-]+|\b\w+=[^\s,]+/u.test(text);
+}
+
+function looksCodeHeavy(text: string, stats: TextStats): boolean {
+  if (/\b(function|return|const|let|var|class|def|SELECT|FROM|WHERE|GROUP BY)\b|Error:/u.test(text)) {
+    return true;
   }
 
-  return symbols;
+  return /[{}();=<>]/u.test(text) && stats.symbolRatio > 0.08;
 }
 
 function extractPrompt(record: Record<string, unknown>): string {
