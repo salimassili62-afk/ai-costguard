@@ -1,5 +1,10 @@
 node_modules/
 dist/
+coverage/
+legacy-artifacts/
+docs/archive/
+landing/.next/
+landing/out/
 *.log
 *.tgz
 .ai-costguard/

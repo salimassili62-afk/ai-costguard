@@ -18,11 +18,14 @@ assert.equal(root.GuardPro, undefined);
 const pro = await import('../dist/pro.js');
 assert.equal(typeof pro.GuardPro, 'function');
 
-for (const file of walkFiles(['examples', 'templates', 'landing', 'docs'])) {
+for (const file of walkFiles(['examples', 'templates', 'landing', 'docs', 'marketing', 'pro-v0.1'])) {
   const content = readFileSync(file, 'utf8');
   assert.doesNotMatch(content, /\.\.\/src/u, `${file} imports private src`);
   assert.doesNotMatch(content, /firewall_blocked/u, `${file} uses stale error shape`);
   assert.doesNotMatch(content, /aifw budget|npx aifw init/u, `${file} advertises nonexistent CLI command`);
+  assert.doesNotMatch(content, /express-firewall|nextjs-firewall|ai-firewall/u, `${file} uses stale firewall naming`);
+  assert.doesNotMatch(content, /\$29\/month|\$29\/mo|Pro-\$29/u, `${file} uses stale Pro pricing`);
+  assert.doesNotMatch(content, /â|Â/u, `${file} appears to contain mojibake`);
 }
 
 for (const file of ['README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'ARCHITECTURE.md']) {

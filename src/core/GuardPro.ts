@@ -100,6 +100,14 @@ export class GuardPro {
    * Atomically charges estimated spend for a project and throws GuardError when budget is exceeded.
    */
   async checkAndCharge(projectId: string, estimatedCost: number): Promise<void> {
+    if (!projectId.trim()) {
+      throw new Error('GuardPro projectId must be a non-empty string');
+    }
+
+    if (!Number.isFinite(estimatedCost) || estimatedCost < 0) {
+      throw new Error('GuardPro estimatedCost must be a finite non-negative number');
+    }
+
     const key = this.getSpendKey(projectId);
     const redis = await this.getUsableRedis();
     const total = redis
@@ -278,7 +286,12 @@ export class GuardPro {
     `;
 
     const total = await redis.eval(script, 1, key, estimatedCost.toString(), this.windowSeconds.toString());
-    return Number(total);
+    const numericTotal = Number(total);
+    if (!Number.isFinite(numericTotal) || numericTotal < 0) {
+      throw new Error('Redis returned an invalid spend total');
+    }
+
+    return numericTotal;
   }
 
   private incrementLocal(projectId: string, estimatedCost: number): number {

@@ -1,5 +1,6 @@
 # AI CostGuard
 [![npm version](https://img.shields.io/npm/v/@salimassili/ai-costguard)](https://www.npmjs.com/package/@salimassili/ai-costguard)
+[![AI CostGuard Pro](https://img.shields.io/badge/Pro-$19%2Fmo-orange)](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
 
 AI CostGuard is a local-first runtime safety layer for AI agents that prevents runaway costs, loops, retries, and budget explosions before API calls execute. It wraps OpenAI-compatible clients and function-style SDK calls, estimates request cost locally, blocks budget overruns, detects repeated prompts, emits structured events, and exposes CLI checks plus a local dashboard.
 
@@ -401,6 +402,24 @@ await pro.shutdown();
 `ioredis` is an optional dependency and is not loaded by the root import.
 
 AI CostGuard does not include license-key checks or local commercial-license enforcement.
+
+## AI CostGuard Pro
+
+AI CostGuard Free is the open-source npm package above — free forever, MIT licensed.
+
+**AI CostGuard Pro** is a $19/month or $199/year subscription for teams taking AI agents into production. Lemon Squeezy handles purchase, receipts, and subscription management. The npm package does not perform runtime license-key enforcement.
+
+Current `pro-v0.1` materials include:
+
+- Redis/GuardPro setup guide
+- Multi-process shared-budget example
+- Environment-variable based Redis/webhook configuration guidance
+
+Planned monthly updates include multi-tenant examples, tokenizer adapter recipes, `GuardError` handling patterns, pricing override guides, production checklists, and framework config starters as those files are completed.
+
+No runtime license-key enforcement. No private npm package. No SaaS backend. You get a downloadable folder of setup materials and examples that use the public package API. Use environment variables or your deployment secret manager for provider keys, `REDIS_URL`, and webhook URLs; never hardcode secrets.
+
+[Get AI CostGuard Pro →](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
 
 ## CLI
 
