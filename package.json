@@ -44,7 +44,7 @@
     "clean": "rimraf dist",
     "build": "npm run clean && tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test --experimental-test-coverage --test-coverage-include=dist/**/*.js --test-coverage-lines=80 --test-coverage-functions=80 --test-coverage-branches=70 \"test/**/*.test.mjs\"",
+    "test": "npm run build && node scripts/run-tests.js",
     "smoke": "node test/smoke-examples.mjs",
     "benchmark": "node benchmarks/run.mjs",
     "benchmark:tokens": "node benchmarks/token-accuracy.mjs",

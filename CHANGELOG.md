@@ -6,6 +6,9 @@
 
 - Recalibrated the built-in zero-dependency token estimator with simple model-family and text-shape heuristics.
 - Improved the fixed proxy token benchmark from `237.76%` average error to `9.68%` average error while keeping `registerTokenizer()` as the recommended exact-counting path.
+- Removed tracked generated coverage output, legacy artifacts, and archived pre-CostGuard concept docs from the active repository.
+- Renamed starter templates from `*-firewall` to `*-costguard` and updated template dependencies to `@salimassili/ai-costguard` `^2.1.1`.
+- Aligned Pro copy around the current $19/month or $199/year Lemon Squeezy plan and marked the `pro-v0.1` folder as a Redis-focused starter.
 
 ## 2.1.0 - 2026-06-09
 

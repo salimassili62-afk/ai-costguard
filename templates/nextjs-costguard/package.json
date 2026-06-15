@@ -1,0 +1,27 @@
+{
+  "name": "nextjs-ai-costguard",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "ai:check": "aifw check"
+  },
+  "dependencies": {
+    "@salimassili/ai-costguard": "^2.1.1",
+    "next": "14.2.0",
+    "openai": "^4.28.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.0",
+    "typescript": "^5"
+  }
+}

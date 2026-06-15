@@ -1,0 +1,28 @@
+{
+  "name": "express-ai-costguard",
+  "version": "1.0.0",
+  "description": "Express server with AI CostGuard protection",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "node --loader ts-node/esm src/server.ts",
+    "ai:check": "aifw check"
+  },
+  "dependencies": {
+    "@salimassili/ai-costguard": "^2.1.1",
+    "dotenv": "^16.4.0",
+    "express": "^4.18.2",
+    "openai": "^4.28.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

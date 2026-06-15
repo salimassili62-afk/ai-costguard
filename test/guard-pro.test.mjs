@@ -8,6 +8,7 @@ class FakeRedis {
   status = 'wait';
   values = new Map();
   failEval = false;
+  invalidEvalResult = false;
   deleted = [];
 
   on() {
@@ -20,6 +21,7 @@ class FakeRedis {
 
   async eval(_script, _keys, key, amount) {
     if (this.failEval) throw new Error('redis down');
+    if (this.invalidEvalResult) return 'not-a-number';
     const next = Number(this.values.get(key) ?? '0') + Number(amount);
     this.values.set(key, String(next));
     return String(next);
@@ -73,6 +75,35 @@ test('GuardPro falls back to local state when Redis fails', async () => {
   assert.equal(await guard.getSpend('project-b'), 0.02);
 
   await assert.rejects(() => guard.checkAndCharge('project-b', 0.02), /exceeded budget/);
+});
+
+test('GuardPro rejects invalid charges before mutating spend', async () => {
+  const redis = new FakeRedis();
+  const guard = new GuardPro({
+    redisUrl: 'redis://unit-invalid',
+    redisClient: redis,
+    budget: 1,
+    windowSeconds: 60,
+  });
+
+  await assert.rejects(() => guard.checkAndCharge('', 0.01), /projectId must be a non-empty string/);
+  await assert.rejects(() => guard.checkAndCharge('project-c', -0.01), /estimatedCost must be a finite non-negative number/);
+  await assert.rejects(() => guard.checkAndCharge('project-c', Number.NaN), /estimatedCost must be a finite non-negative number/);
+  assert.equal(await guard.getSpend('project-c'), 0);
+});
+
+test('GuardPro falls back when Redis returns an invalid total', async () => {
+  const redis = new FakeRedis();
+  redis.invalidEvalResult = true;
+  const guard = new GuardPro({
+    redisUrl: 'redis://unit-invalid-total',
+    redisClient: redis,
+    budget: 1,
+    windowSeconds: 60,
+  });
+
+  await guard.checkAndCharge('project-d', 0.25);
+  assert.equal(await guard.getSpend('project-d'), 0.25);
 });
 
 test('GuardPro factory creates guards', () => {
