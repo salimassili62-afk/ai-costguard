@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 const coverageThresholdFlags = [
   '--test-coverage-include',
@@ -28,7 +30,13 @@ if (supportsCoverageThresholdFlags) {
   );
 }
 
-args.push('test/**/*.test.mjs');
+const testFiles = findTestFiles('test');
+if (testFiles.length === 0) {
+  console.error('[ai-costguard] No test files found under test/.');
+  process.exit(1);
+}
+
+args.push(...testFiles);
 
 const result = spawnSync(process.execPath, args, {
   stdio: 'inherit',
@@ -36,3 +44,23 @@ const result = spawnSync(process.execPath, args, {
 });
 
 process.exit(result.status ?? 1);
+
+function findTestFiles(root) {
+  const files = [];
+  visit(root);
+  return files.sort();
+
+  function visit(path) {
+    const stat = statSync(path);
+    if (stat.isDirectory()) {
+      for (const entry of readdirSync(path)) {
+        visit(join(path, entry));
+      }
+      return;
+    }
+
+    if (path.endsWith('.test.mjs')) {
+      files.push(path);
+    }
+  }
+}
