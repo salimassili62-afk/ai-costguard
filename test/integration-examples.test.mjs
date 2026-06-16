@@ -9,6 +9,7 @@ const examples = [
   'examples/integrations/langchain-retry-storm.mjs',
   'examples/integrations/mastra-agent.mjs',
   'examples/integrations/crewai-budget-gate.mjs',
+  'examples/integrations/slack-webhook-block-demo.mjs',
   'examples/integrations/ci-budget-check.mjs',
 ];
 
