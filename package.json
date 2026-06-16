@@ -1,6 +1,6 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "Local-first runtime safety layer for AI agents that blocks runaway costs, loops, retries, and budget overruns before API calls execute.",
   "type": "module",
   "main": "./dist/index.js",
