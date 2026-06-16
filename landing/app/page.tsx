@@ -3,6 +3,10 @@
 import { useState } from 'react'
 
 const installCommand = 'npm install @salimassili/ai-costguard'
+const demoCommands = [
+  'npm install @salimassili/ai-costguard',
+  'node examples/integrations/slack-webhook-block-demo.mjs',
+]
 const PRO_CHECKOUT_URL =
   'https://aicostguard.lemonsqueezy.com/checkout/buy/b79ebf12-0afa-46d3-bbf5-e57b6f7f2238'
 const GITHUB_URL = 'https://github.com/salimassili62-afk/ai-costguard'
@@ -30,6 +34,12 @@ const proIncludes = [
   'Express production example',
   'Vercel AI production adapter example',
   'Security, limits, and failure-mode notes',
+]
+
+const demoProofs = [
+  'No paid API calls',
+  'Blocks before provider execution',
+  'Webhook URL is never printed',
 ]
 
 const limits = [
@@ -95,6 +105,37 @@ export default function Home() {
             >
               GitHub
             </a>
+          </div>
+        </div>
+      </section>
+
+      <section className="container mx-auto px-4 py-12">
+        <div className="mx-auto grid max-w-5xl gap-6 rounded-lg border border-gray-800 bg-gray-900 p-6 md:grid-cols-[1.1fr_0.9fr] md:p-8">
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-green-500">
+              Mocked local demo
+            </p>
+            <h2 className="mb-4 text-2xl font-bold leading-tight text-white">
+              See it block a risky AI call before it reaches the provider
+            </h2>
+            <p className="mb-5 text-sm leading-relaxed text-gray-400">
+              AI CostGuard can stop a risky agent call before the provider API is executed. The mocked Slack
+              webhook demo runs locally, makes no paid API calls, and shows provider calls executed: 0.
+            </p>
+            <div className="grid gap-2">
+              {demoProofs.map((item) => (
+                <CheckRow key={item} text={item} />
+              ))}
+            </div>
+          </div>
+
+          <div className="terminal h-fit">
+            {demoCommands.map((command) => (
+              <div key={command} className="terminal-line">
+                <span className="text-gray-500">$ </span>
+                <span>{command}</span>
+              </div>
+            ))}
           </div>
         </div>
       </section>
