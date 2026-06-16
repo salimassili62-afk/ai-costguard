@@ -1,7 +1,19 @@
 import { Redis } from 'ioredis';
+import { sendCostGuardAlert } from './alerts.js';
 import { GuardError } from './GuardCore.js';
-import type { GuardWebhookConfig, RequestContext } from './types.js';
+import type {
+  CostGuardAlertPayload,
+  CostGuardAlertsConfig,
+  GuardBudgetConfig,
+  GuardWebhookConfig,
+  RequestContext,
+} from './types.js';
 import { notifyBlockWebhooks } from './webhooks.js';
+
+interface NormalizedBudget {
+  maxUsd: number;
+  thresholdUsd?: number;
+}
 
 /**
  * Minimal Redis client surface used by GuardPro. Supplying redisClient is useful for tests.
@@ -30,9 +42,15 @@ export interface GuardProConfig {
   /** Redis connection URL. Instances sharing this URL reuse one pooled connection. */
   redisUrl: string;
   /** Budget in USD for each project/session window. */
-  budget: number;
+  budget: number | GuardBudgetConfig;
   /** Session TTL in seconds. Defaults to 86400. */
   windowSeconds?: number;
+  /** Default project identifier used in alert payloads when checkAndCharge supplies a project key. */
+  projectId?: string;
+  /** Agent run identifier used in alert payloads. */
+  runId?: string;
+  /** Local webhook alerts for block and threshold events. Disabled unless webhookUrl is supplied. */
+  alerts?: CostGuardAlertsConfig;
   /** Slack webhook URL for budget block notifications. */
   slackWebhook?: string;
   /** Discord webhook URL for budget block notifications. */
@@ -65,9 +83,14 @@ export class GuardPro {
   private readonly redisClient?: GuardProRedisClient;
   private readonly poolEntry?: RedisPoolEntry;
   private readonly budget: number;
+  private readonly budgetThresholdUsd?: number;
   private readonly windowSeconds: number;
+  private readonly projectId?: string;
+  private readonly runId?: string;
+  private readonly alerts?: CostGuardAlertsConfig;
   private readonly webhooks?: GuardWebhookConfig;
   private readonly localSpend = new Map<string, LocalSpendRecord>();
+  private readonly thresholdAlertedKeys = new Set<string>();
   private directRedisFailed = false;
   private directRedisReady = false;
 
@@ -75,9 +98,15 @@ export class GuardPro {
    * Creates a GuardPro instance and reuses a pooled Redis connection for the same URL.
    */
   constructor(config: GuardProConfig) {
+    const budget = normalizeBudget(config.budget);
+
     this.redisUrl = config.redisUrl;
-    this.budget = config.budget;
+    this.budget = budget.maxUsd;
+    this.budgetThresholdUsd = budget.thresholdUsd;
     this.windowSeconds = config.windowSeconds ?? 86_400;
+    this.projectId = readString(config.projectId);
+    this.runId = readString(config.runId);
+    this.alerts = normalizeAlerts(config.alerts);
     this.webhooks = {
       ...config.webhooks,
       slack: config.webhooks?.slack ?? config.slackWebhook,
@@ -120,9 +149,15 @@ export class GuardPro {
         `Project "${projectId}" exceeded budget. ` +
         `Spend: $${total.toFixed(6)} / Budget: $${this.budget.toFixed(6)}`;
 
-      await notifyBlockWebhooks(this.webhooks, { reason, context });
+      void notifyBlockWebhooks(this.webhooks, { reason, context });
+      void sendCostGuardAlert(
+        this.alerts,
+        this.createAlertPayload('blocked', 'budget_exceeded', 'critical', projectId, estimatedCost, total)
+      );
       throw new GuardError(reason, context, 'BUDGET_EXCEEDED');
     }
+
+    this.alertThresholdIfNeeded(projectId, total);
   }
 
   /**
@@ -350,6 +385,42 @@ export class GuardPro {
       prompt: `project:${projectId}`,
     };
   }
+
+  private alertThresholdIfNeeded(projectId: string, total: number): void {
+    if (this.budgetThresholdUsd === undefined || total < this.budgetThresholdUsd) return;
+
+    const key = this.getSpendKey(projectId);
+    if (this.thresholdAlertedKeys.has(key)) return;
+
+    this.thresholdAlertedKeys.add(key);
+    void sendCostGuardAlert(
+      this.alerts,
+      this.createAlertPayload('threshold', 'budget_threshold', 'warning', projectId, undefined, total)
+    );
+  }
+
+  private createAlertPayload(
+    event: 'blocked' | 'threshold',
+    reason: string,
+    severity: 'warning' | 'critical',
+    projectId: string,
+    estimatedCost: number | undefined,
+    total: number
+  ): CostGuardAlertPayload {
+    return {
+      event,
+      reason,
+      severity,
+      projectId: this.projectId ?? projectId,
+      runId: this.runId,
+      estimatedCostUsd: estimatedCost === undefined ? undefined : roundMoney(estimatedCost),
+      estimatedSavedUsd: estimatedCost === undefined ? undefined : roundMoney(estimatedCost),
+      budgetLimitUsd: roundMoney(this.budget),
+      budgetUsedUsd: roundMoney(total),
+      timestamp: new Date().toISOString(),
+      packageName: '@salimassili/ai-costguard',
+    };
+  }
 }
 
 /**
@@ -357,4 +428,68 @@ export class GuardPro {
  */
 export function getProGuard(config: GuardProConfig): GuardPro {
   return new GuardPro(config);
+}
+
+function normalizeBudget(configBudget: GuardProConfig['budget']): NormalizedBudget {
+  if (typeof configBudget === 'number') {
+    return { maxUsd: validateMoney(configBudget, 'budget') };
+  }
+
+  const maxUsd = validateMoney(configBudget.maxUsd, 'budget.maxUsd');
+  const thresholdUsd =
+    configBudget.thresholdUsd === undefined
+      ? normalizeThresholdPercent(configBudget.thresholdPercent, maxUsd)
+      : validateMoney(configBudget.thresholdUsd, 'budget.thresholdUsd');
+
+  if (thresholdUsd !== undefined && thresholdUsd > maxUsd) {
+    throw new Error('budget threshold must be less than or equal to budget.maxUsd');
+  }
+
+  return { maxUsd, thresholdUsd };
+}
+
+function normalizeThresholdPercent(value: unknown, maxUsd: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1) {
+    throw new Error('budget.thresholdPercent must be a number greater than 0 and less than or equal to 1');
+  }
+  return maxUsd * value;
+}
+
+function normalizeAlerts(alerts: GuardProConfig['alerts']): CostGuardAlertsConfig | undefined {
+  if (!alerts) return undefined;
+
+  if (alerts.timeoutMs !== undefined && (!Number.isFinite(alerts.timeoutMs) || alerts.timeoutMs < 0)) {
+    throw new Error('alerts.timeoutMs must be a non-negative number');
+  }
+
+  if (alerts.format !== undefined && alerts.format !== 'json' && alerts.format !== 'slack') {
+    throw new Error('alerts.format must be "json" or "slack"');
+  }
+
+  for (const event of alerts.events ?? []) {
+    if (event !== 'blocked' && event !== 'threshold') {
+      throw new Error('alerts.events can only include "blocked" or "threshold"');
+    }
+  }
+
+  return {
+    ...alerts,
+    webhookUrl: readString(alerts.webhookUrl),
+  };
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function validateMoney(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative finite number`);
+  }
+  return value;
+}
+
+function roundMoney(value: number): number {
+  return Math.round(validateMoney(value, 'money') * 1_000_000) / 1_000_000;
 }

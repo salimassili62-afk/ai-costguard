@@ -12,6 +12,8 @@ node examples/integrations/vercel-ai-chatbot.mjs
 node examples/integrations/langchain-retry-storm.mjs
 node examples/integrations/mastra-agent.mjs
 node examples/integrations/crewai-budget-gate.mjs
+node examples/integrations/webhook-alerts.mjs
+node examples/integrations/slack-alerts.mjs
 node examples/integrations/ci-budget-check.mjs
 ```
 
@@ -141,6 +143,40 @@ CrewAI is Python-native, so this TypeScript package cannot instrument internal P
 - Use provider-side billing alerts for final reconciliation.
 
 Runnable mock: `examples/integrations/crewai-budget-gate.mjs`
+
+## Local Webhook And Slack Alerts
+
+Alerts are local-first and optional. AI CostGuard only sends to a webhook URL you provide, and alert failures never change guard decisions.
+
+```ts
+import { guard } from '@salimassili/ai-costguard';
+
+const openai = guard(client, {
+  budget: { maxUsd: 5, thresholdPercent: 0.8 },
+  projectId: 'agent-api',
+  runId: 'run-1',
+  alerts: {
+    webhookUrl: process.env.COSTGUARD_WEBHOOK_URL,
+    events: ['blocked', 'threshold'],
+    timeoutMs: 1500,
+  },
+});
+```
+
+For Slack incoming webhooks, use `format: 'slack'` or `slack: true`:
+
+```ts
+const openai = guard(client, {
+  budget: { maxUsd: 5 },
+  alerts: {
+    webhookUrl: process.env.COSTGUARD_SLACK_WEBHOOK,
+    events: ['blocked'],
+    format: 'slack',
+  },
+});
+```
+
+Runnable mocks: `examples/integrations/webhook-alerts.mjs` and `examples/integrations/slack-alerts.mjs`
 
 ## CI Budget Check
 

@@ -1,6 +1,6 @@
 # AI CostGuard
 [![npm version](https://img.shields.io/npm/v/@salimassili/ai-costguard)](https://www.npmjs.com/package/@salimassili/ai-costguard)
-[![AI CostGuard Pro](https://img.shields.io/badge/Pro-$19%2Fmo-orange)](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
+[![AI CostGuard Pro](https://img.shields.io/badge/Pro-$49%2Fmo-orange)](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
 
 AI CostGuard is a local-first runtime safety layer for AI agents that prevents runaway costs, loops, retries, and budget explosions before API calls execute. It wraps OpenAI-compatible clients and function-style SDK calls, estimates request cost locally, blocks budget overruns, detects repeated prompts, emits structured events, and exposes CLI checks plus a local dashboard.
 
@@ -148,7 +148,12 @@ Current runtime block codes:
 
 ```ts
 guard(client, {
-  budget: 10,
+  budget: {
+    maxUsd: 10,
+    thresholdPercent: 0.8,
+  },
+  projectId: 'production-api',
+  runId: 'optional-agent-run',
   maxSteps: 100,
   behaviorAnalysis: true,
   maxHistory: 32,
@@ -164,6 +169,12 @@ guard(client, {
     userId: 'optional-user',
     sessionId: 'optional-agent-run',
   },
+  alerts: {
+    webhookUrl: process.env.COSTGUARD_WEBHOOK_URL,
+    events: ['blocked', 'threshold'],
+    timeoutMs: 1500,
+    format: 'slack',
+  },
   guardedMethods: ['chat.completions.create', 'responses.create'],
   pricingOverrides: [],
   webhooks: {
@@ -178,6 +189,7 @@ guard(client, {
 ```
 
 `scope` isolates budgets and behavior history. If no scope is supplied, the guard uses one process-local default scope.
+Top-level `projectId` and `runId` are convenience aliases for alert payloads and default scope values.
 
 ## Loop Detection Tuning
 
@@ -303,6 +315,53 @@ unsubscribe();
 
 Supported events are `cost`, `allow`, and `block`. Handler errors are swallowed so observability code cannot change guard decisions.
 
+## Slack / Webhook Alerts
+
+Alerts are optional, local-first, and sent only to a webhook URL you provide. They are best-effort: failed or slow alert delivery never allows a blocked provider call, never replaces `GuardError`, and never crashes your app.
+If `alerts.events` is omitted, only `blocked` alerts are sent. `threshold` alerts require `events: ['threshold']` or `events: ['blocked', 'threshold']` plus `budget.thresholdPercent` or `budget.thresholdUsd`.
+
+```ts
+import { guard } from '@salimassili/ai-costguard';
+
+const safeClient = guard(openai, {
+  budget: { maxUsd: 5, thresholdPercent: 0.8 },
+  projectId: 'demo-agent',
+  runId: 'run-2026-06-16',
+  alerts: {
+    webhookUrl: process.env.COSTGUARD_WEBHOOK_URL,
+    events: ['blocked', 'threshold'],
+    timeoutMs: 1500,
+    format: 'slack',
+  },
+});
+```
+
+If `format` is omitted, AI CostGuard sends a redacted JSON payload:
+
+```json
+{
+  "event": "blocked",
+  "reason": "budget_exceeded",
+  "severity": "critical",
+  "projectId": "demo-agent",
+  "runId": "run-2026-06-16",
+  "model": "gpt-4",
+  "provider": "openai",
+  "estimatedCostUsd": 0.0306,
+  "estimatedSavedUsd": 0.0306,
+  "budgetLimitUsd": 5,
+  "budgetUsedUsd": 4.99,
+  "timestamp": "2026-06-16T00:00:00.000Z",
+  "packageName": "@salimassili/ai-costguard"
+}
+```
+
+For Slack incoming webhooks, use `format: 'slack'` or `slack: true`. AI CostGuard sends a Slack-compatible `{ "text": "..." }` body.
+
+Alerts do not include raw prompts, request bodies, headers, API keys, environment variables, or webhook URLs. Do not commit webhook URLs; load them from environment variables or your secret manager. Alerts are not SaaS telemetry, a billing ledger, provider invoice reconciliation, or a hard security boundary.
+
+Legacy `webhooks.slack`, `webhooks.discord`, `slackWebhook`, and `discordWebhook` block notifications remain supported for compatibility. New code should prefer `alerts`.
+
 ## Local Dashboard
 
 Opt into a local JSONL event log:
@@ -346,6 +405,7 @@ Runnable mocked examples are included for:
 - LangChain retry-storm prevention
 - Mastra-style agent runner protection
 - CrewAI launch/budget gate
+- Local webhook and Slack alert mocks
 - CI budget checks
 
 See `docs/INTEGRATIONS.md` and `examples/integrations`.
@@ -391,8 +451,16 @@ import { GuardPro } from '@salimassili/ai-costguard/pro';
 
 const pro = new GuardPro({
   redisUrl: process.env.REDIS_URL ?? '',
-  budget: 25,
+  budget: { maxUsd: 25, thresholdPercent: 0.8 },
   windowSeconds: 86400,
+  projectId: 'production-agent',
+  runId: process.env.DEPLOYMENT_ID,
+  alerts: {
+    webhookUrl: process.env.COSTGUARD_WEBHOOK_URL,
+    events: ['blocked', 'threshold'],
+    timeoutMs: 1500,
+    format: 'slack',
+  },
 });
 
 await pro.checkAndCharge('production', 0.0042);
@@ -407,12 +475,16 @@ AI CostGuard does not include license-key checks or local commercial-license enf
 
 AI CostGuard Free is the open-source npm package above — free forever, MIT licensed.
 
-**AI CostGuard Pro** is a $19/month or $199/year subscription for teams taking AI agents into production. Lemon Squeezy handles purchase, receipts, and subscription management. The npm package does not perform runtime license-key enforcement.
+**AI CostGuard Pro Self-Serve — $49/month** is a production setup bundle for teams taking Node.js AI agents into production. Lemon Squeezy handles purchase, receipts, and subscription management. The npm package does not perform runtime license-key enforcement.
 
 Current `pro-v0.1` materials include:
 
+- Slack/webhook and threshold alert recipes
 - Redis/GuardPro setup guide
 - Multi-process shared-budget example
+- CI budget gate
+- Vercel AI and Express production examples
+- Production deployment guide
 - Environment-variable based Redis/webhook configuration guidance
 
 Planned monthly updates include multi-tenant examples, tokenizer adapter recipes, `GuardError` handling patterns, pricing override guides, production checklists, and framework config starters as those files are completed.

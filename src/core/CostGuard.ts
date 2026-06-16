@@ -6,6 +6,11 @@ export { registerTokenizer } from './tokenizer.js';
 export type { TokenizerFn } from './tokenizer.js';
 export type {
   GuardConfig,
+  GuardBudgetConfig,
+  CostGuardAlertsConfig,
+  CostGuardAlertEvent,
+  CostGuardAlertPayload,
+  CostGuardAlertSeverity,
   GuardErrorCode,
   GuardEvent,
   GuardEventHandler,

@@ -1,9 +1,12 @@
 import { getPricing } from '../pricing/index.js';
+import { sendCostGuardAlert } from './alerts.js';
 import { appendGuardEventLog } from './event-log.js';
 import { GuardEventEmitter } from './events.js';
 import { cosineSimilarity, maxCosineSimilarity } from './similarity.js';
 import { estimateRequestTokens } from './tokenizer.js';
 import type {
+  CostGuardAlertPayload,
+  CostGuardAlertsConfig,
   GuardConfig,
   GuardErrorCode,
   GuardEventHandler,
@@ -31,6 +34,35 @@ const DEFAULT_GUARDED_METHODS = [
 
 const RETRY_TERMS = /\b(retry|retries|retrying|rerun|repeat|again)\b/u;
 const FAILURE_TERMS = /\b(error|fail|failed|failure|timeout|timed out|rate limit|429|unavailable|exception)\b/u;
+
+interface NormalizedBudget {
+  maxUsd: number;
+  thresholdUsd?: number;
+}
+
+interface NormalizedGuardConfig {
+  budget: number;
+  budgetThresholdUsd?: number;
+  behaviorAnalysis: boolean;
+  maxHistory: number;
+  historyTtlMs: number;
+  maxSteps?: number;
+  loopSimilarityThreshold: number;
+  loopMinRepeats: number;
+  loopWindowSize: number;
+  retryThreshold: number;
+  guardedMethods: string[];
+  unknownModelPolicy: 'block' | 'fallback';
+  unknownModelPricing?: GuardConfig['unknownModelPricing'];
+  pricingOverrides?: GuardConfig['pricingOverrides'];
+  scope?: GuardScope;
+  alerts?: CostGuardAlertsConfig;
+  webhooks?: GuardConfig['webhooks'];
+  eventLogPath?: string;
+  eventLogPrompt: 'none' | 'preview';
+  slackWebhook?: string;
+  discordWebhook?: string;
+}
 
 /**
  * Result returned by the guard evaluator.
@@ -104,35 +136,11 @@ export class GuardError extends Error {
  * Shared synchronous evaluator used by the free proxy guard and middleware.
  */
 export class GuardCore {
-  private readonly config: Required<
-    Pick<
-      GuardConfig,
-      | 'budget'
-      | 'behaviorAnalysis'
-      | 'maxHistory'
-      | 'historyTtlMs'
-      | 'loopSimilarityThreshold'
-      | 'loopMinRepeats'
-      | 'retryThreshold'
-      | 'guardedMethods'
-      | 'unknownModelPolicy'
-      | 'eventLogPrompt'
-    >
-  > & { loopWindowSize: number } &
-    Pick<
-      GuardConfig,
-      | 'maxSteps'
-      | 'pricingOverrides'
-      | 'unknownModelPricing'
-      | 'scope'
-      | 'webhooks'
-      | 'eventLogPath'
-      | 'slackWebhook'
-      | 'discordWebhook'
-  >;
+  private readonly config: NormalizedGuardConfig;
   private readonly state: GuardState;
   private readonly emitter = new GuardEventEmitter();
   private readonly approximateTokenWarnings = new Set<string>();
+  private readonly thresholdAlertedScopes = new Set<string>();
 
   /**
    * Creates a process-local guard evaluator.
@@ -144,9 +152,12 @@ export class GuardCore {
     const loopWindowSize = config.loopDetection?.windowSize ?? DEFAULT_LOOP_WINDOW_SIZE;
 
     validateLoopConfig(loopSimilarityThreshold, loopMinRepeats, loopWindowSize);
+    const budget = normalizeBudget(config.budget);
+    const scope = normalizeConfigScope(config);
 
     this.config = {
-      budget: config.budget ?? DEFAULT_BUDGET,
+      budget: budget.maxUsd,
+      budgetThresholdUsd: budget.thresholdUsd,
       behaviorAnalysis: config.behaviorAnalysis ?? true,
       maxHistory: config.maxHistory ?? DEFAULT_MAX_HISTORY,
       historyTtlMs: Math.max(0, config.historyTtlMs ?? DEFAULT_HISTORY_TTL_MS),
@@ -159,7 +170,8 @@ export class GuardCore {
       unknownModelPolicy: config.unknownModelPolicy ?? 'block',
       unknownModelPricing: config.unknownModelPricing,
       pricingOverrides: config.pricingOverrides,
-      scope: config.scope,
+      scope,
+      alerts: normalizeAlerts(config.alerts),
       eventLogPath: config.eventLogPath,
       eventLogPrompt: config.eventLogPrompt ?? 'none',
       slackWebhook: config.slackWebhook,
@@ -220,9 +232,10 @@ export class GuardCore {
     const pricing = registryPricing ?? (this.config.unknownModelPolicy === 'fallback' ? this.config.unknownModelPricing : undefined);
     const inputPer1kTokens = pricing?.inputPer1kTokens ?? 0;
     const outputPer1kTokens = pricing?.outputPer1kTokens ?? 0;
-    const estimatedCost =
+    const estimatedCost = sanitizeMoney(
       (tokenEstimate.inputTokens / 1000) * inputPer1kTokens +
-      (tokenEstimate.outputTokens / 1000) * outputPer1kTokens;
+        (tokenEstimate.outputTokens / 1000) * outputPer1kTokens
+    );
     return {
       model,
       pricingKnown: pricing !== undefined,
@@ -244,6 +257,7 @@ export class GuardCore {
    * Checks a request context, records allowed calls, emits events, and throws GuardError on block.
    */
   check(context: RequestContext): GuardCheckResult {
+    normalizeRequestContext(context);
     const scope = this.getScopeState(context);
     this.pruneScope(scope, Date.now());
     this.recordAttempt(scope, context);
@@ -276,6 +290,7 @@ export class GuardCore {
 
     this.recordAllowed(scope, context);
     this.emit('allow', context);
+    this.alertThresholdIfNeeded(scope, context);
 
     return { decision: 'allow', context };
   }
@@ -391,6 +406,10 @@ export class GuardCore {
     this.emit('block', context, reason, code);
 
     void notifyBlockWebhooks(this.config.webhooks, { reason, context });
+    void sendCostGuardAlert(this.config.alerts, this.createAlertPayload('blocked', codeToAlertReason(code), 'critical', context, {
+      estimatedSavedUsd: context.estimatedCost,
+      budgetUsedUsd: scope.totalCost,
+    }));
 
     throw new GuardError(reason, context, code, { similarity, scopeKey: context.scopeKey ?? 'default' });
   }
@@ -435,6 +454,7 @@ export class GuardCore {
       projectId: readString(record.projectId ?? record.project_id) ?? this.config.scope?.projectId,
       userId: readString(record.userId ?? record.user_id) ?? this.config.scope?.userId,
       sessionId: readString(record.sessionId ?? record.session_id) ?? this.config.scope?.sessionId,
+      runId: readString(record.runId ?? record.run_id) ?? this.config.scope?.runId,
     };
   }
 
@@ -447,6 +467,47 @@ export class GuardCore {
       `[ai-costguard] Using approximate token counting for model: ${model}. ` +
         'Register an exact tokenizer via registerTokenizer() for production use.'
     );
+  }
+
+  private alertThresholdIfNeeded(scope: GuardScopeState, context: RequestContext): void {
+    const thresholdUsd = this.config.budgetThresholdUsd;
+    if (thresholdUsd === undefined || scope.totalCost < thresholdUsd) return;
+
+    const scopeKey = context.scopeKey ?? createScopeKey(context.scope);
+    if (this.thresholdAlertedScopes.has(scopeKey)) return;
+
+    this.thresholdAlertedScopes.add(scopeKey);
+    void sendCostGuardAlert(
+      this.config.alerts,
+      this.createAlertPayload('threshold', 'budget_threshold', 'warning', context, {
+        budgetUsedUsd: scope.totalCost,
+      })
+    );
+  }
+
+  private createAlertPayload(
+    event: 'blocked' | 'threshold',
+    reason: string,
+    severity: 'info' | 'warning' | 'critical',
+    context: RequestContext,
+    money: { estimatedSavedUsd?: number; budgetUsedUsd?: number } = {}
+  ): CostGuardAlertPayload {
+    return {
+      event,
+      reason,
+      severity,
+      projectId: context.scope?.projectId,
+      runId: context.scope?.runId ?? context.scope?.sessionId,
+      model: context.model === 'unknown' ? undefined : context.model,
+      provider: inferProvider(context.model),
+      estimatedCostUsd: roundMoney(context.estimatedCost),
+      estimatedSavedUsd:
+        money.estimatedSavedUsd === undefined ? undefined : roundMoney(money.estimatedSavedUsd),
+      budgetLimitUsd: roundMoney(this.config.budget),
+      budgetUsedUsd: money.budgetUsedUsd === undefined ? undefined : roundMoney(money.budgetUsedUsd),
+      timestamp: new Date().toISOString(),
+      packageName: '@salimassili/ai-costguard',
+    };
   }
 }
 
@@ -486,6 +547,77 @@ function hydrateScopeState(state: GuardScopeState): void {
   state.recentRetries ??= [];
 }
 
+function normalizeBudget(configBudget: GuardConfig['budget']): NormalizedBudget {
+  if (configBudget === undefined) return { maxUsd: DEFAULT_BUDGET };
+
+  if (typeof configBudget === 'number') {
+    return { maxUsd: validateMoney(configBudget, 'budget') };
+  }
+
+  if (!isRecord(configBudget)) {
+    throw new Error('budget must be a non-negative number or { maxUsd } object');
+  }
+
+  const maxUsd = validateMoney(configBudget.maxUsd, 'budget.maxUsd');
+  const thresholdUsd =
+    configBudget.thresholdUsd === undefined
+      ? normalizeThresholdPercent(configBudget.thresholdPercent, maxUsd)
+      : validateMoney(configBudget.thresholdUsd, 'budget.thresholdUsd');
+
+  if (thresholdUsd !== undefined && thresholdUsd > maxUsd) {
+    throw new Error('budget threshold must be less than or equal to budget.maxUsd');
+  }
+
+  return { maxUsd, thresholdUsd };
+}
+
+function normalizeThresholdPercent(value: unknown, maxUsd: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1) {
+    throw new Error('budget.thresholdPercent must be a number greater than 0 and less than or equal to 1');
+  }
+  return maxUsd * value;
+}
+
+function normalizeConfigScope(config: GuardConfig): GuardScope | undefined {
+  const projectId = readString(config.scope?.projectId) ?? readString(config.projectId);
+  const userId = readString(config.scope?.userId);
+  const sessionId = readString(config.scope?.sessionId);
+  const runId = readString(config.scope?.runId) ?? readString(config.runId);
+
+  if (!projectId && !userId && !sessionId && !runId) return undefined;
+
+  return {
+    projectId,
+    userId,
+    sessionId,
+    runId,
+  };
+}
+
+function normalizeAlerts(alerts: GuardConfig['alerts']): CostGuardAlertsConfig | undefined {
+  if (!alerts) return undefined;
+
+  if (alerts.timeoutMs !== undefined && (!Number.isFinite(alerts.timeoutMs) || alerts.timeoutMs < 0)) {
+    throw new Error('alerts.timeoutMs must be a non-negative number');
+  }
+
+  if (alerts.format !== undefined && alerts.format !== 'json' && alerts.format !== 'slack') {
+    throw new Error('alerts.format must be "json" or "slack"');
+  }
+
+  for (const event of alerts.events ?? []) {
+    if (event !== 'blocked' && event !== 'threshold') {
+      throw new Error('alerts.events can only include "blocked" or "threshold"');
+    }
+  }
+
+  return {
+    ...alerts,
+    webhookUrl: readString(alerts.webhookUrl),
+  };
+}
+
 function validateLoopConfig(similarityThreshold: number, minHistorySize: number, windowSize: number): void {
   if (!Number.isFinite(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 1) {
     throw new Error('loopDetection.similarityThreshold must be between 0 and 1');
@@ -498,6 +630,17 @@ function validateLoopConfig(similarityThreshold: number, minHistorySize: number,
   if (!Number.isFinite(windowSize) || windowSize < 1) {
     throw new Error('loopDetection.windowSize must be at least 1');
   }
+}
+
+function normalizeRequestContext(context: RequestContext): void {
+  context.model = readString(context.model) ?? 'unknown';
+  context.tokens = sanitizeCount(context.tokens);
+  context.inputTokens = context.inputTokens === undefined ? undefined : sanitizeCount(context.inputTokens);
+  context.outputTokens = context.outputTokens === undefined ? undefined : sanitizeCount(context.outputTokens);
+  context.estimatedCost = sanitizeMoney(context.estimatedCost);
+  context.actualCost = context.actualCost === undefined ? undefined : sanitizeMoney(context.actualCost);
+  context.timestamp = Number.isFinite(context.timestamp) ? context.timestamp : Date.now();
+  context.prompt = typeof context.prompt === 'string' ? context.prompt : '';
 }
 
 function createEmptyContext(): RequestContext {
@@ -518,8 +661,9 @@ function createScopeKey(scope: GuardScope | undefined): string {
   const projectId = normalizeScopePart(scope?.projectId);
   const userId = normalizeScopePart(scope?.userId);
   const sessionId = normalizeScopePart(scope?.sessionId);
-  if (!projectId && !userId && !sessionId) return 'default';
-  return `project:${projectId ?? '*'}|user:${userId ?? '*'}|session:${sessionId ?? '*'}`;
+  const runId = normalizeScopePart(scope?.runId);
+  if (!projectId && !userId && !sessionId && !runId) return 'default';
+  return `project:${projectId ?? '*'}|user:${userId ?? '*'}|session:${sessionId ?? '*'}|run:${runId ?? '*'}`;
 }
 
 function normalizeScopePart(value: string | undefined): string | undefined {
@@ -556,6 +700,51 @@ function readString(value: unknown): string | undefined {
 function readPositiveNumber(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
   return value;
+}
+
+function validateMoney(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative finite number`);
+  }
+  return value;
+}
+
+function sanitizeMoney(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
+  return value;
+}
+
+function sanitizeCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
+  return Math.trunc(value);
+}
+
+function roundMoney(value: number): number {
+  return Math.round(sanitizeMoney(value) * 1_000_000) / 1_000_000;
+}
+
+function codeToAlertReason(code: GuardErrorCode): string {
+  switch (code) {
+    case 'UNKNOWN_MODEL':
+      return 'unknown_model';
+    case 'BUDGET_EXCEEDED':
+      return 'budget_exceeded';
+    case 'MAX_STEPS_EXCEEDED':
+      return 'max_steps_exceeded';
+    case 'LOOP_DETECTED':
+      return 'loop_detected';
+    case 'RETRY_STORM_DETECTED':
+      return 'retry_storm';
+  }
+}
+
+function inferProvider(model: string): string | undefined {
+  const normalized = model.toLowerCase();
+  if (normalized.startsWith('gpt-') || normalized.startsWith('o1') || normalized.startsWith('o3')) {
+    return 'openai';
+  }
+  if (normalized.startsWith('claude-')) return 'anthropic';
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -169,6 +169,8 @@ function stripGuardMetadata(args: readonly unknown[]): readonly unknown[] {
     user_id: _user_id,
     sessionId: _sessionId,
     session_id: _session_id,
+    runId: _runId,
+    run_id: _run_id,
     ...providerParams
   } = first;
 

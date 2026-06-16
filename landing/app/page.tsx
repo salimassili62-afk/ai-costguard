@@ -21,19 +21,22 @@ const freeFeatures = [
 ]
 
 const proFeatures = [
-  'Redis/shared-budget setup guide',
-  'Cross-process budget examples',
-  'CI budget gate guide and script',
-  'Production deployment guidance',
-  'Troubleshooting and launch checklists',
+  'Slack/webhook alerts',
+  'Threshold alerts',
+  'Redis shared budget setup',
+  'CI budget gate',
+  'Private updates',
 ]
 
 const proIncludes = [
-  'README and Free vs Pro positioning',
-  'Redis Docker Compose starter',
+  'Slack/webhook alerts',
+  'Threshold alerts',
+  'Redis shared budget setup',
+  'CI budget gate',
+  'Vercel AI example',
   'Express production example',
-  'Vercel AI production adapter example',
-  'Security, limits, and failure-mode notes',
+  'Production deployment guide',
+  'Private updates',
 ]
 
 const demoProofs = [
@@ -43,7 +46,7 @@ const demoProofs = [
 ]
 
 const limits = [
-  'No hosted backend or cloud control plane.',
+  'No SaaS, login, tracking, or hosted control plane.',
   'No private npm package.',
   'No runtime license enforcement.',
   'Not enterprise security software or a hard security boundary.',
@@ -67,12 +70,12 @@ export default function Home() {
             Local-first AI agent cost protection
           </p>
           <h1 className="mb-5 text-4xl font-bold leading-tight text-white md:text-5xl">
-            Stop runaway AI-agent costs before API calls execute.
+            Stop runaway AI-agent API calls before they hit your bill.
           </h1>
           <p className="mx-auto mb-8 max-w-2xl text-lg leading-relaxed text-gray-400">
             AI CostGuard is a Node.js runtime safety layer for AI agents. Use the free npm package for
-            process-local protection, then add Pro when production needs Redis/shared budgets and deployment
-            playbooks.
+            process-local protection, then add AI CostGuard Pro Self-Serve when production needs alerts,
+            shared-budget recipes, CI gates, and deployment examples.
           </p>
 
           <div className="terminal mx-auto mb-6 max-w-lg text-left">
@@ -95,7 +98,7 @@ export default function Home() {
               rel="noopener noreferrer"
               className="rounded-lg bg-orange-600 px-7 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-orange-700"
             >
-              Buy Pro - TND60/month
+              Buy Pro - $49/month
             </a>
             <a
               href={GITHUB_URL}
@@ -147,7 +150,7 @@ export default function Home() {
             <PlanCard title="Free" subtitle="MIT npm package" items={freeFeatures} ctaHref={NPM_URL} ctaText="View on npm" />
             <PlanCard
               title="Pro"
-              subtitle="TND60/month production bundle"
+              subtitle="AI CostGuard Pro Self-Serve — $49/month"
               items={proFeatures}
               ctaHref={PRO_CHECKOUT_URL}
               ctaText="Buy Pro"
@@ -188,8 +191,8 @@ export default function Home() {
           </p>
           <h2 className="mb-3 text-2xl font-bold text-white">Ready for shared production budgets?</h2>
           <p className="mb-6 text-sm leading-relaxed text-gray-400">
-            Get the Redis setup, cross-process examples, CI budget gate, deployment guidance, troubleshooting
-            notes, and checklists in one copyable bundle.
+            AI CostGuard Pro Self-Serve adds production-ready alerts, shared-budget recipes, CI gates, and
+            deployment examples for teams shipping Node.js AI agents.
           </p>
           <a
             id="buy-pro-final-btn"
@@ -198,7 +201,7 @@ export default function Home() {
             rel="noopener noreferrer"
             className="inline-block rounded-lg bg-orange-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-orange-700"
           >
-            Buy Pro - TND60/month
+            Buy Pro - $49/month
           </a>
         </div>
       </section>

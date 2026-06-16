@@ -25,6 +25,64 @@ export interface GuardWebhookConfig {
 }
 
 /**
+ * Alert event names supported by the local webhook alert API.
+ */
+export type CostGuardAlertEvent = 'blocked' | 'threshold';
+
+/**
+ * Alert severity used in local webhook payloads.
+ */
+export type CostGuardAlertSeverity = 'info' | 'warning' | 'critical';
+
+/**
+ * Local webhook alert configuration. Alerts are best-effort and disabled unless webhookUrl is supplied.
+ */
+export interface CostGuardAlertsConfig {
+  /** User-owned webhook endpoint. Never logged by AI CostGuard. */
+  webhookUrl?: string;
+  /** Alert events to send. Defaults to ["blocked"]. */
+  events?: CostGuardAlertEvent[];
+  /** Per-alert timeout in milliseconds. Defaults to 1500. */
+  timeoutMs?: number;
+  /** Payload format. Defaults to "json". */
+  format?: 'json' | 'slack';
+  /** Convenience flag for Slack-compatible message bodies. */
+  slack?: boolean;
+}
+
+/**
+ * Stable local webhook payload sent for alert events.
+ */
+export interface CostGuardAlertPayload {
+  event: CostGuardAlertEvent;
+  reason: string;
+  severity: CostGuardAlertSeverity;
+  projectId?: string;
+  runId?: string;
+  model?: string;
+  provider?: string;
+  estimatedCostUsd?: number;
+  estimatedSavedUsd?: number;
+  budgetLimitUsd?: number;
+  budgetUsedUsd?: number;
+  timestamp: string;
+  packageName: '@salimassili/ai-costguard';
+  packageVersion?: string;
+}
+
+/**
+ * Budget configuration. A number keeps legacy behavior; object form enables threshold alerts.
+ */
+export interface GuardBudgetConfig {
+  /** Maximum process-local estimated spend in USD. */
+  maxUsd: number;
+  /** Optional threshold as a fraction from 0 to 1, for example 0.8 for 80%. */
+  thresholdPercent?: number;
+  /** Optional absolute threshold in USD. Takes precedence over thresholdPercent. */
+  thresholdUsd?: number;
+}
+
+/**
  * Scope used to isolate budgets and behavior history.
  */
 export interface GuardScope {
@@ -34,6 +92,8 @@ export interface GuardScope {
   userId?: string;
   /** Agent run, workflow, request, or conversation identifier. */
   sessionId?: string;
+  /** Agent run identifier used by alert payloads and scope isolation. */
+  runId?: string;
 }
 
 /**
@@ -41,7 +101,7 @@ export interface GuardScope {
  */
 export interface GuardConfig {
   /** Process-local budget in USD for each scope. Defaults to 10. */
-  budget?: number;
+  budget?: number | GuardBudgetConfig;
   /** Enables loop, retry-storm, and step-count checks. Defaults to true. */
   behaviorAnalysis?: boolean;
   /** Maximum prompt history retained for similarity checks. Defaults to 32. */
@@ -75,6 +135,8 @@ export interface GuardConfig {
   scope?: GuardScope;
   /** Optional runtime pricing entries that take precedence over built-ins. */
   pricingOverrides?: ModelPricing[];
+  /** Local webhook alerts for block and threshold events. Disabled unless webhookUrl is supplied. */
+  alerts?: CostGuardAlertsConfig;
   /** Slack and Discord webhook destinations for block events. */
   webhooks?: GuardWebhookConfig;
   /** Optional JSONL file path for local dashboard/event history. Disabled by default. */
@@ -85,6 +147,10 @@ export interface GuardConfig {
   slackWebhook?: string;
   /** Convenience Discord webhook URL. Equivalent to webhooks.discord. */
   discordWebhook?: string;
+  /** Top-level project identifier, equivalent to scope.projectId when scope omits projectId. */
+  projectId?: string;
+  /** Top-level run identifier, equivalent to scope.runId when scope omits runId. */
+  runId?: string;
 }
 
 /**

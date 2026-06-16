@@ -26,7 +26,7 @@ function createClient() {
       completions: {
         create: async (params) => {
           calls += 1;
-          if ('sessionId' in params || 'projectId' in params || 'userId' in params) {
+          if ('sessionId' in params || 'projectId' in params || 'userId' in params || 'runId' in params) {
             throw new Error('guard metadata leaked to provider');
           }
           return { ok: true, model: params.model, usage: { prompt_tokens: 10, completion_tokens: 5 } };
@@ -47,6 +47,7 @@ test('guard allows in-budget calls and exposes event controls', async () => {
     messages: [{ role: 'user', content: 'write one unique greeting' }],
     max_tokens: 5,
     sessionId: 'unit-session',
+    runId: 'unit-run',
   });
 
   unsubscribe();
