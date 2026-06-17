@@ -99,7 +99,7 @@ Local-first AI agent cost protection </p>
           rel="noopener noreferrer"
           className="rounded-lg bg-orange-600 px-7 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-orange-700"
         >
-          Buy Pro â€” TND 140/month
+          Buy Pro - TND 140/month
         </a>
 
         <a
@@ -163,7 +163,7 @@ Local-first AI agent cost protection </p>
 
         <PlanCard
           title="Pro"
-          subtitle="AI CostGuard Pro Self-Serve â€” TND 140/month"
+          subtitle="AI CostGuard Pro Self-Serve - TND 140/month"
           items={proFeatures}
           ctaHref={PRO_CHECKOUT_URL}
           ctaText="Buy Pro"
@@ -224,7 +224,7 @@ Local-first AI agent cost protection </p>
         rel="noopener noreferrer"
         className="inline-block rounded-lg bg-orange-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-orange-700"
       >
-        Buy Pro â€” TND 140/month
+        Buy Pro - TND 140/month
       </a>
     </div>
   </section>
