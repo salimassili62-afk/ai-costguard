@@ -1,8 +1,10 @@
 # AI CostGuard Pro v0.1 Archive
 
-This folder is archived Redis-starter material. The current paid deliverable is the AI CostGuard Pro production kit, sold as a $49 one-time digital download.
+This folder is archived Redis-starter material.
 
-This folder uses the public `@salimassili/ai-costguard` npm package. Keep it only for historical reference; do not advertise `pro-v0.1` as the current paid kit.
+The current paid deliverable is the **AI CostGuard Pro production kit**, sold as a **$49 one-time digital download**.
+
+This folder uses the public `@salimassili/ai-costguard` npm package. Keep it only for historical reference. Do **not** advertise `pro-v0.1` as the current paid kit.
 
 ## What Is Included
 
@@ -29,12 +31,13 @@ For Redis examples, also install `ioredis`:
 npm install ioredis
 ```
 
-Node.js >= 18 is required.
+Node.js `>= 18` is required.
 
 ## What This Is Not
 
-- Not a private npm package. All examples import from `@salimassili/ai-costguard`.
-- Not runtime license-key enforcement or DRM. Lemon Squeezy handles purchase management and receipts.
+- Not the current paid AI CostGuard Pro production kit.
+- Not a private npm package.
+- Not runtime license-key enforcement or DRM.
 - Not a SaaS backend or cloud dashboard.
 - Not a billing ledger or provider invoice reconciler.
 - Not a guarantee that estimates match provider invoices.
@@ -43,14 +46,21 @@ Node.js >= 18 is required.
 
 1. Read `SETUP.md` if you need Redis/GuardPro shared budgets.
 2. Review `examples/redis-shared-budget.ts`.
-3. Copy the pattern into your project and configure secrets through environment variables or your deployment secret manager.
+3. Copy the pattern into your project.
+4. Configure secrets through environment variables or your deployment secret manager.
 
-## Monthly Updates
+## Archived Update Notes
 
-Updated versions of this folder are delivered to your Lemon Squeezy customer portal as the package evolves. You will receive an email notification when a new version is available.
+This folder is kept only for historical reference.
+
+Current paid-kit updates are handled through the **AI CostGuard Pro production kit** and Lemon Squeezy delivery flow, not through this archived `pro-v0.1` folder.
 
 ## Questions
 
-Open an issue on GitHub: https://github.com/salimassili62-afk/ai-costguard
+Open an issue on GitHub:
+
+```text
+https://github.com/salimassili62-afk/ai-costguard
+```
 
 Or reply to your Lemon Squeezy confirmation email.
