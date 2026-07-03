@@ -59,3 +59,5 @@ ai-costguard dashboard --events .ai-costguard/events.jsonl --budget 5 --once --j
 `eventLogPrompt` defaults to `none`, so prompt text is not written to disk. Set `eventLogPrompt: 'preview'` only for local debugging where prompt previews are acceptable.
 
 The dashboard is a local development view, not a billing ledger. Use provider billing exports for financial reconciliation.
+
+Actual spend comes from `usage` events written after successful provider responses expose recognizable `usage` fields.

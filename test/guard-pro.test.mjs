@@ -19,12 +19,14 @@ class FakeRedis {
     this.status = 'ready';
   }
 
-  async eval(_script, _keys, key, amount) {
+  async eval(_script, _keys, key, amount, _ttlSeconds, budget) {
     if (this.failEval) throw new Error('redis down');
     if (this.invalidEvalResult) return 'not-a-number';
-    const next = Number(this.values.get(key) ?? '0') + Number(amount);
+    const current = Number(this.values.get(key) ?? '0');
+    const next = current + Number(amount);
+    if (next > Number(budget)) return [0, String(current), String(next)];
     this.values.set(key, String(next));
-    return String(next);
+    return [1, String(next), String(next)];
   }
 
   async get(key) {
@@ -59,6 +61,7 @@ test('GuardPro charges Redis atomically and blocks over budget', async () => {
   assert.equal(await guard.getSpend('project-a'), 0.04);
 
   await assert.rejects(() => guard.checkAndCharge('project-a', 0.02), GuardError);
+  assert.equal(await guard.getSpend('project-a'), 0.04);
   assert.equal(redis.status, 'ready');
 
   await guard.resetSpend('project-a');
@@ -78,7 +81,8 @@ test('GuardPro falls back to local state when Redis fails', async () => {
   await guard.checkAndCharge('project-b', 0.02);
   assert.equal(await guard.getSpend('project-b'), 0.02);
 
-  await assert.rejects(() => guard.checkAndCharge('project-b', 0.02), /exceeded budget/);
+  await assert.rejects(() => guard.checkAndCharge('project-b', 0.02), /would exceed budget/);
+  assert.equal(await guard.getSpend('project-b'), 0.02);
 });
 
 test('GuardPro rejects invalid charges before mutating spend', async () => {
@@ -154,7 +158,7 @@ test('GuardPro blocked call triggers one raw webhook alert and still throws Guar
     assert.equal(requests[0].body.runId, 'run-1');
     assert.equal(requests[0].body.packageName, '@salimassili/ai-costguard');
     assert.equal(requests[0].body.budgetLimitUsd, 0.01);
-    assert.equal(requests[0].body.budgetUsedUsd, 0.02);
+    assert.equal(requests[0].body.budgetUsedUsd, 0);
     assert.equal(requests[0].body.estimatedSavedUsd, 0.02);
   } finally {
     globalThis.fetch = originalFetch;

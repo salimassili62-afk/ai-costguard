@@ -1,8 +1,8 @@
-# AI CostGuard Pro v0.1
+# AI CostGuard Pro v0.1 Archive
 
-Thank you for subscribing to AI CostGuard Pro ($19/month or $199/year).
+This folder is archived Redis-starter material. The current paid deliverable is the AI CostGuard Pro production kit, sold as a $49 one-time digital download.
 
-This folder is your Pro v0.1 download. It is a Redis-focused starter that uses the public `@salimassili/ai-costguard` npm package. Do not advertise additional Pro examples or checklists as included until those files are present in the downloadable folder.
+This folder uses the public `@salimassili/ai-costguard` npm package. Keep it only for historical reference; do not advertise `pro-v0.1` as the current paid kit.
 
 ## What Is Included
 
@@ -34,7 +34,7 @@ Node.js >= 18 is required.
 ## What This Is Not
 
 - Not a private npm package. All examples import from `@salimassili/ai-costguard`.
-- Not runtime license-key enforcement or DRM. Lemon Squeezy handles subscription management and receipts.
+- Not runtime license-key enforcement or DRM. Lemon Squeezy handles purchase management and receipts.
 - Not a SaaS backend or cloud dashboard.
 - Not a billing ledger or provider invoice reconciler.
 - Not a guarantee that estimates match provider invoices.

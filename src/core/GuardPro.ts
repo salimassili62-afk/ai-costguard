@@ -15,6 +15,12 @@ interface NormalizedBudget {
   thresholdUsd?: number;
 }
 
+interface ChargeDecision {
+  allowed: boolean;
+  total: number;
+  projectedTotal: number;
+}
+
 /**
  * Minimal Redis client surface used by GuardPro. Supplying redisClient is useful for tests.
  */
@@ -25,8 +31,8 @@ export interface GuardProRedisClient {
   on?(eventName: 'ready' | 'error' | 'close', handler: () => void): unknown;
   /** Opens the Redis connection when the client is lazy. */
   connect?(): Promise<unknown>;
-  /** Evaluates the atomic spend increment Lua script. */
-  eval(script: string, keys: number, key: string, amount: string, ttlSeconds: string): Promise<unknown>;
+  /** Evaluates the atomic spend decision Lua script. */
+  eval(script: string, keys: number, key: string, amount: string, ttlSeconds: string, budget: string): Promise<unknown>;
   /** Reads the current spend value. */
   get(key: string): Promise<string | null>;
   /** Deletes a spend key. */
@@ -139,25 +145,26 @@ export class GuardPro {
 
     const key = this.getSpendKey(projectId);
     const redis = await this.getUsableRedis();
-    const total = redis
-      ? await this.incrementRedisOrFallback(redis, key, projectId, estimatedCost)
-      : this.incrementLocal(projectId, estimatedCost);
+    const decision = redis
+      ? await this.chargeRedisOrFallback(redis, key, projectId, estimatedCost)
+      : this.chargeLocal(projectId, estimatedCost);
 
-    if (total > this.budget) {
+    if (!decision.allowed) {
       const context = this.createContext(projectId, estimatedCost);
       const reason =
-        `Project "${projectId}" exceeded budget. ` +
-        `Spend: $${total.toFixed(6)} / Budget: $${this.budget.toFixed(6)}`;
+        `Project "${projectId}" would exceed budget. ` +
+        `Projected spend: $${decision.projectedTotal.toFixed(6)} / Budget: $${this.budget.toFixed(6)}. ` +
+        `Current spend remains $${decision.total.toFixed(6)}.`;
 
       void notifyBlockWebhooks(this.webhooks, { reason, context });
       void sendCostGuardAlert(
         this.alerts,
-        this.createAlertPayload('blocked', 'budget_exceeded', 'critical', projectId, estimatedCost, total)
+        this.createAlertPayload('blocked', 'budget_exceeded', 'critical', projectId, estimatedCost, decision.total)
       );
       throw new GuardError(reason, context, 'BUDGET_EXCEEDED');
     }
 
-    this.alertThresholdIfNeeded(projectId, total);
+    this.alertThresholdIfNeeded(projectId, decision.total);
   }
 
   /**
@@ -296,44 +303,71 @@ export class GuardPro {
     }
   }
 
-  private async incrementRedisOrFallback(
+  private async chargeRedisOrFallback(
     redis: GuardProRedisClient,
     key: string,
     projectId: string,
     estimatedCost: number
-  ): Promise<number> {
+  ): Promise<ChargeDecision> {
     try {
-      return await this.incrementRedis(redis, key, estimatedCost);
+      return await this.chargeRedis(redis, key, estimatedCost);
     } catch {
       this.markDisconnected();
-      return this.incrementLocal(projectId, estimatedCost);
+      return this.chargeLocal(projectId, estimatedCost);
     }
   }
 
-  private async incrementRedis(redis: GuardProRedisClient, key: string, estimatedCost: number): Promise<number> {
+  private async chargeRedis(redis: GuardProRedisClient, key: string, estimatedCost: number): Promise<ChargeDecision> {
     const script = `
+      local currentRaw = redis.call("GET", KEYS[1])
+      if not currentRaw then
+        currentRaw = "0"
+      end
+      local current = tonumber(currentRaw)
+      local amount = tonumber(ARGV[1])
+      local budget = tonumber(ARGV[3])
+      local projected = current + amount
+      if projected > budget then
+        return {0, currentRaw, tostring(projected)}
+      end
       local total = redis.call("INCRBYFLOAT", KEYS[1], ARGV[1])
       local ttl = redis.call("TTL", KEYS[1])
       if ttl == -1 then
         redis.call("EXPIRE", KEYS[1], ARGV[2])
       end
-      return total
+      return {1, total, tostring(projected)}
     `;
 
-    const total = await redis.eval(script, 1, key, estimatedCost.toString(), this.windowSeconds.toString());
-    const numericTotal = Number(total);
-    if (!Number.isFinite(numericTotal) || numericTotal < 0) {
-      throw new Error('Redis returned an invalid spend total');
-    }
+    const result = await redis.eval(
+      script,
+      1,
+      key,
+      estimatedCost.toString(),
+      this.windowSeconds.toString(),
+      this.budget.toString()
+    );
 
-    return numericTotal;
+    return parseRedisChargeDecision(result);
   }
 
-  private incrementLocal(projectId: string, estimatedCost: number): number {
+  private chargeLocal(projectId: string, estimatedCost: number): ChargeDecision {
     const record = this.getLocal(projectId);
-    record.total += estimatedCost;
+    const projectedTotal = roundMoney(record.total + estimatedCost);
+    if (projectedTotal > this.budget) {
+      return {
+        allowed: false,
+        total: roundMoney(record.total),
+        projectedTotal,
+      };
+    }
+
+    record.total = projectedTotal;
     this.localSpend.set(projectId, record);
-    return record.total;
+    return {
+      allowed: true,
+      total: record.total,
+      projectedTotal,
+    };
   }
 
   private getLocal(projectId: string): LocalSpendRecord {
@@ -488,6 +522,32 @@ function validateMoney(value: unknown, field: string): number {
     throw new Error(`${field} must be a non-negative finite number`);
   }
   return value;
+}
+
+function parseRedisChargeDecision(result: unknown): ChargeDecision {
+  if (!Array.isArray(result) || result.length < 3) {
+    throw new Error('Redis returned an invalid spend decision');
+  }
+
+  const allowedFlag = Number(result[0]);
+  const total = Number(result[1]);
+  const projectedTotal = Number(result[2]);
+
+  if (
+    (allowedFlag !== 0 && allowedFlag !== 1) ||
+    !Number.isFinite(total) ||
+    total < 0 ||
+    !Number.isFinite(projectedTotal) ||
+    projectedTotal < 0
+  ) {
+    throw new Error('Redis returned an invalid spend decision');
+  }
+
+  return {
+    allowed: allowedFlag === 1,
+    total: roundMoney(total),
+    projectedTotal: roundMoney(projectedTotal),
+  };
 }
 
 function roundMoney(value: number): number {

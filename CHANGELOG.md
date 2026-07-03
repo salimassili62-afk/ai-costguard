@@ -1,14 +1,21 @@
 # Changelog
 
-## 2.1.1 - Unreleased
+## 2.2.0 - 2026-07-03
+
+### Fixed
+
+- Changed `GuardPro` budget enforcement so blocked over-budget charges are not persisted as real spend.
+- Added `usage` event logging after provider usage reconciliation so local dashboard actual-spend summaries reflect provider-reported usage.
 
 ### Changed
 
+- Aligned release-facing Pro copy around the current `$49` one-time production setup kit.
+- Updated starter template dependencies to `@salimassili/ai-costguard` `^2.2.0`.
 - Recalibrated the built-in zero-dependency token estimator with simple model-family and text-shape heuristics.
 - Improved the fixed proxy token benchmark from `237.76%` average error to `9.68%` average error while keeping `registerTokenizer()` as the recommended exact-counting path.
-- Removed tracked generated coverage output, legacy artifacts, and archived pre-CostGuard concept docs from the active repository.
-- Renamed starter templates from `*-firewall` to `*-costguard` and updated template dependencies to `@salimassili/ai-costguard` `^2.1.1`.
-- Aligned Pro copy around the current $19/month or $199/year Lemon Squeezy plan and marked the `pro-v0.1` folder as a Redis-focused starter.
+- Added release hygiene ignores and contribution notes for generated artifacts, local install-test projects, package output, and paid-kit archives.
+- Renamed starter templates from `*-firewall` to `*-costguard`.
+- Marked the older `pro-v0.1` folder as archived Redis-starter material.
 
 ## 2.1.0 - 2026-06-09
 

@@ -17,7 +17,7 @@ AI CostGuard Pro
 ## Product Tagline (≤ 80 characters)
 
 ```
-Production setup materials for AI CostGuard — $19/month or $199/year.
+Production setup materials for AI CostGuard — $49 one-time.
 ```
 
 ---
@@ -25,7 +25,7 @@ Production setup materials for AI CostGuard — $19/month or $199/year.
 ## Short Description (checkout page subtitle, ≤ 160 characters)
 
 ```
-Redis/GuardPro setup guide and shared-budget example for AI CostGuard production deployments. Cancel anytime.
+Production recipes, examples, and deployment notes for AI CostGuard.
 ```
 
 ---
@@ -35,11 +35,11 @@ Redis/GuardPro setup guide and shared-budget example for AI CostGuard production
 ```
 AI CostGuard is a local-first runtime safety layer for AI agents. The free npm package (MIT, open source) guards OpenAI, Anthropic, and Vercel AI SDK calls, blocks budget overruns and loops, and runs entirely in your process — no cloud, no SaaS, no proxy.
 
-AI CostGuard Pro is a $19/month or $199/year subscription. The current v0.1 download includes Redis-focused production setup material and an annotated shared-budget example that use the same public package API. Lemon Squeezy handles purchase, receipts, and subscription management. No private npm package. No runtime license-key enforcement. No hosted backend.
+AI CostGuard Pro is a $49 one-time production setup kit. The current production kit includes Redis/shared-budget setup material, Slack/webhook alert guidance, CI budget gates, deployment examples, and checklists that use the same public package API. Lemon Squeezy handles purchase, receipts, and downloads. No private npm package. No runtime license-key enforcement. No hosted backend.
 
 ---
 
-What you get in Pro v0.1:
+What you get in the production kit:
 
 Redis / GuardPro setup
 Step-by-step guide to install ioredis, configure connection pooling, initialize GuardPro, and share a budget across multiple Node.js processes or workers.
@@ -47,8 +47,8 @@ Step-by-step guide to install ioredis, configure connection pooling, initialize 
 Multi-process shared budget example
 Annotated TypeScript showing two worker processes sharing one Redis-backed budget via GuardPro.checkAndCharge() — the pattern teams reach for when a single process is not enough.
 
-Planned monthly updates
-Multi-tenant isolation examples, tokenizer adapter recipes, GuardError handling patterns, pricing override guides, production checklists, and framework config starters will be delivered as files are completed. Do not list a file as included until it exists in the downloadable folder.
+Production recipes and examples
+Copy-paste recipes for Slack alerts, webhook alerts, Redis shared budgets, CI budget gates, unknown model pricing, max-step protection, retry-storm protection, and prompt-loop protection.
 
 ---
 
@@ -61,7 +61,7 @@ What Pro is not:
 
 All Pro materials use only the public @salimassili/ai-costguard npm package and its published API surface.
 
-Plans: $19/month or $199/year. Cancel anytime from your Lemon Squeezy customer portal.
+Price: $49 one-time digital download.
 ```
 
 ---
@@ -73,7 +73,7 @@ Plans: $19/month or $199/year. Cancel anytime from your Lemon Squeezy customer p
 • Multi-process shared budget example
 • Environment-variable based Redis/webhook configuration
 • Local-first production deployment notes
-• Monthly updates as new Pro materials are completed
+• Production recipes, examples, and checklists
 • Uses the public @salimassili/ai-costguard API
 • No private npm package or runtime license-key enforcement
 ```
@@ -83,9 +83,9 @@ Plans: $19/month or $199/year. Cancel anytime from your Lemon Squeezy customer p
 ## Checkout Page Confirmation / What Happens Next
 
 ```
-After subscribing you'll receive a download link for the AI CostGuard Pro v0.1 folder. The current folder contains the Redis/GuardPro setup guide and a shared-budget TypeScript example. Additional production materials should be delivered as future updates only after the files are complete.
+After purchase you'll receive a download link for the AI CostGuard Pro production kit. The current kit contains production recipes, Express and Vercel examples, Redis/GuardPro setup material, CI budget gates, templates, and deployment notes.
 
-Monthly updates are delivered to subscribers as new downloadable versions. You can access all versions from your Lemon Squeezy customer portal.
+You can access the download from your Lemon Squeezy customer portal.
 
 Questions? Reply to this email or reach out via the GitHub repository.
 ```
@@ -95,19 +95,19 @@ Questions? Reply to this email or reach out via the GitHub repository.
 ## Purchase Confirmation Email Blurb
 
 ```
-Subject: Your AI CostGuard Pro subscription is active
+Subject: Your AI CostGuard Pro download is ready
 
 Hi,
 
-Thanks for subscribing to AI CostGuard Pro ($19/month or $199/year plan).
+Thanks for purchasing AI CostGuard Pro ($49 one-time).
 
-Your download link for AI CostGuard Pro v0.1 is attached to this email and also available in your Lemon Squeezy customer portal at any time.
+Your download link for the AI CostGuard Pro production kit is attached to this email and also available in your Lemon Squeezy customer portal at any time.
 
-What's inside v0.1:
+What's inside:
 - Redis/GuardPro setup guide (SETUP.md)
 - Multi-process shared budget example
 
-Monthly updates ship to your portal as new downloadable versions.
+The production kit is available from your Lemon Squeezy customer portal.
 
 — Salim Assili, AI CostGuard
 ```
@@ -117,12 +117,12 @@ Monthly updates ship to your portal as new downloadable versions.
 ## Post-Purchase / Thank You Page
 
 ```
-You're subscribed to AI CostGuard Pro.
+Your AI CostGuard Pro download is ready.
 
 Your download link is in your confirmation email. You can also access it anytime from your Lemon Squeezy customer portal.
 
 Getting started:
-1. Download the pro-v0.1.zip file
+1. Download the production kit zip file
 2. Open README.md for an overview of what's included
 3. Follow SETUP.md to configure Redis + GuardPro
 4. Copy the examples you need into your project
@@ -141,22 +141,22 @@ Need help? Open an issue on GitHub or reply to your confirmation email.
 No. All Pro examples and guides use the public `@salimassili/ai-costguard` npm package. There is no private registry or separate install step.
 
 **Q: Is there a runtime license key?**
-No. Lemon Squeezy manages the subscription and receipts. The public npm package has no runtime license-key enforcement or DRM.
+No. Lemon Squeezy manages the purchase and receipts. The public npm package has no runtime license-key enforcement or DRM.
 
 **Q: What is the refund policy?**
-Cancel anytime from your Lemon Squeezy customer portal. No refund is issued for the current billing period.
+Check the Lemon Squeezy checkout terms for the current digital product refund policy.
 
 **Q: What are the current prices?**
-AI CostGuard Pro is currently $19/month or $199/year.
+AI CostGuard Pro is currently $49 one-time.
 
 **Q: Does Pro include hosted monitoring or a cloud dashboard?**
 No. AI CostGuard is entirely local-first. Pro materials are setup guides and examples — no hosted backend is included or required.
 
-**Q: How are monthly updates delivered?**
-Updated downloadable versions are published to your Lemon Squeezy customer portal. You'll receive an email notification when a new version is available.
+**Q: How are updates delivered?**
+If an updated downloadable version is published, it will be available from your Lemon Squeezy customer portal.
 
 **Q: What Node.js version is required?**
 Node ≥ 18, same as the free package.
 
 **Q: Is GuardPro / Redis required to use Pro materials?**
-For v0.1, yes: the included Pro materials focus on Redis-backed shared budgets. Future updates may add tokenizer, GuardError, pricing, and checklist materials that also work with the free process-local guard.
+No. The production kit includes Redis-backed shared-budget material, but it also includes process-local guard recipes, alerts, CI checks, templates, and deployment notes.

@@ -10,7 +10,7 @@
     "ai:check": "aifw check"
   },
   "dependencies": {
-    "@salimassili/ai-costguard": "^2.1.1",
+    "@salimassili/ai-costguard": "^2.2.0",
     "next": "14.2.0",
     "openai": "^4.28.0",
     "react": "^18.2.0",

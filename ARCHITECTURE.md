@@ -68,7 +68,7 @@ The guard tracks estimates before provider execution:
 - `attemptedCost`: all guarded attempts
 - `totalCost`: allowed estimated spend
 - `blockedCost`: estimated spend blocked before provider execution
-- `actualCost`: provider-reported usage when available
+- `actualCost`: provider-reported usage when available, emitted as `usage` events after successful provider responses
 
 Budget enforcement uses estimated allowed spend because the decision happens before the provider call.
 

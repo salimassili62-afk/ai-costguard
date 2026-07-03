@@ -5,7 +5,7 @@ import type { GuardConfig, GuardEventHandler, GuardEventName, GuardState, Reques
  * Event controls added to a guarded client proxy.
  */
 export interface GuardEventControls {
-  /** Subscribes to block, allow, or cost events. */
+  /** Subscribes to block, allow, cost, or usage events. */
   on(eventName: GuardEventName, handler: GuardEventHandler): () => void;
   /** Removes an event handler. */
   off(eventName: GuardEventName, handler: GuardEventHandler): void;

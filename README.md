@@ -1,6 +1,6 @@
 # AI CostGuard
 [![npm version](https://img.shields.io/npm/v/@salimassili/ai-costguard)](https://www.npmjs.com/package/@salimassili/ai-costguard)
-[![AI CostGuard Pro](https://img.shields.io/badge/Pro-$49%2Fmo-orange)](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
+[![AI CostGuard Pro](https://img.shields.io/badge/Pro-$49%20one--time-orange)](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
 
 AI CostGuard is a local-first runtime safety layer for AI agents that prevents runaway costs, loops, retries, and budget explosions before API calls execute. It wraps OpenAI-compatible clients and function-style SDK calls, estimates request cost locally, blocks budget overruns, detects repeated prompts, emits structured events, and exposes CLI checks plus a local dashboard.
 
@@ -313,7 +313,7 @@ const unsubscribe = openai.on('block', (event) => {
 unsubscribe();
 ```
 
-Supported events are `cost`, `allow`, and `block`. Handler errors are swallowed so observability code cannot change guard decisions.
+Supported events are `cost`, `allow`, `block`, and `usage`. `usage` is emitted after a successful provider response when recognizable usage fields are available. Handler errors are swallowed so observability code cannot change guard decisions.
 
 ## Slack / Webhook Alerts
 
@@ -467,17 +467,19 @@ await pro.checkAndCharge('production', 0.0042);
 await pro.shutdown();
 ```
 
+`checkAndCharge()` only persists allowed spend. If a charge would exceed the budget, `GuardPro` throws `GuardError` and leaves the stored Redis/local spend at the previous allowed total.
+
 `ioredis` is an optional dependency and is not loaded by the root import.
 
 AI CostGuard does not include license-key checks or local commercial-license enforcement.
 
 ## AI CostGuard Pro
 
-AI CostGuard Free is the open-source npm package above — free forever, MIT licensed.
+AI CostGuard Free is the open-source npm package above: free forever, MIT licensed.
 
-**AI CostGuard Pro Self-Serve — $49/month** is a production setup bundle for teams taking Node.js AI agents into production. Lemon Squeezy handles purchase, receipts, and subscription management. The npm package does not perform runtime license-key enforcement.
+**AI CostGuard Pro Self-Serve** is a `$49` one-time production setup kit for teams taking Node.js AI agents into production. Lemon Squeezy handles purchase, receipts, and downloads. The npm package does not perform runtime license-key enforcement.
 
-Current `pro-v0.1` materials include:
+Current production-kit materials include:
 
 - Slack/webhook and threshold alert recipes
 - Redis/GuardPro setup guide
@@ -487,7 +489,7 @@ Current `pro-v0.1` materials include:
 - Production deployment guide
 - Environment-variable based Redis/webhook configuration guidance
 
-Planned monthly updates include multi-tenant examples, tokenizer adapter recipes, `GuardError` handling patterns, pricing override guides, production checklists, and framework config starters as those files are completed.
+Future kit updates may include multi-tenant examples, tokenizer adapter recipes, `GuardError` handling patterns, pricing override guides, and framework config starters as those files are completed.
 
 No runtime license-key enforcement. No private npm package. No SaaS backend. You get a downloadable folder of setup materials and examples that use the public package API. Use environment variables or your deployment secret manager for provider keys, `REDIS_URL`, and webhook URLs; never hardcode secrets.
 

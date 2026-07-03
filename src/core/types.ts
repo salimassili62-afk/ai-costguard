@@ -239,7 +239,7 @@ export type GuardDecision = 'allow' | 'block';
 /**
  * Supported event names emitted by guarded clients.
  */
-export type GuardEventName = 'block' | 'allow' | 'cost';
+export type GuardEventName = 'block' | 'allow' | 'cost' | 'usage';
 
 /**
  * Event payload emitted by a guard instance.

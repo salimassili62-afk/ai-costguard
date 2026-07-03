@@ -316,6 +316,7 @@ export class GuardCore {
     this.state.actualCost += actualCost;
     const scope = this.getScopeState(context);
     scope.actualCost += actualCost;
+    this.emit('usage', context);
   }
 
   private checkBudget(scope: GuardScopeState, context: RequestContext): string | undefined {

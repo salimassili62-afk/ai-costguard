@@ -84,15 +84,15 @@ Real guardrails, no fake claims.
 **Tweet 6 (Pro CTA)**
 
 ```
-Just launched AI CostGuard Pro — $19/month or $199/year.
+Just launched AI CostGuard Pro — $49 one-time.
 
 What Pro includes:
 • Redis/GuardPro setup guide
 • Multi-process shared budget example
 • Environment-variable based Redis/webhook config
-• Monthly updates as new production materials are completed
+• Production recipes, examples, and checklists
 
-No private npm. Lemon Squeezy manages the subscription; the package has no runtime license-key enforcement. Uses the same public package.
+No private npm. Lemon Squeezy manages the purchase and download; the package has no runtime license-key enforcement. Uses the same public package.
 
 [Get Pro →] https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro
 ```
@@ -130,7 +130,7 @@ The README has explicit "What it does" and "What it does not" sections because I
 npm: https://www.npmjs.com/package/@salimassili/ai-costguard
 GitHub: https://github.com/salimassili62-afk/ai-costguard
 
-I also launched a $19/month or $199/year Pro plan. v0.1 includes a Redis/GuardPro setup guide and a multi-process shared-budget example, with monthly production materials planned as they are completed. No private npm; Lemon Squeezy manages the subscription and it uses the same public package.
+I also launched a $49 one-time Pro production kit. It includes Redis/GuardPro setup material, production recipes, Express and Vercel examples, CI gates, and deployment notes. No private npm; Lemon Squeezy manages the purchase and it uses the same public package.
 
 Happy to answer questions about the design, especially the loop detection (character trigram cosine similarity) and the token estimation approach (dependency-free approximation with registerTokenizer() for exact counting).
 ```
@@ -161,7 +161,7 @@ One line to add the wrapper:
 Works with OpenAI, Anthropic, Vercel AI SDK, LangChain adapters, and any function-style SDK call.
 
 Free on npm (MIT): @salimassili/ai-costguard
-Pro ($19/month or $199/year): Redis setup guide, shared-budget example, and monthly production-material updates.
+Pro ($49 one-time): production recipes, Redis setup guide, shared-budget example, CI gates, and deployment notes.
 
 Link in comments.
 
