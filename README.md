@@ -1,6 +1,6 @@
 # AI CostGuard
 [![npm version](https://img.shields.io/npm/v/@salimassili/ai-costguard)](https://www.npmjs.com/package/@salimassili/ai-costguard)
-[![AI CostGuard Pro](https://img.shields.io/badge/Pro-$49%20one--time-orange)](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
+[![AI CostGuard Pro](https://img.shields.io/badge/Pro-$99%20one--time-orange)](https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b)
 
 AI CostGuard is a local-first runtime safety layer for AI agents that prevents runaway costs, loops, retries, and budget explosions before API calls execute. It wraps OpenAI-compatible clients and function-style SDK calls, estimates request cost locally, blocks budget overruns, detects repeated prompts, emits structured events, and exposes CLI checks plus a local dashboard.
 
@@ -542,7 +542,7 @@ A simple homemade budget check can stop one request after one counter crosses on
 - Provider pricing registry with runtime overrides and unknown-model blocking.
 - Structured `GuardError` codes and metadata for API responses.
 - Scoped budget and behavior state per project, user, or session.
-- TTL-bounded prompt history.
+- TTL-bounded prompt history.9
 - Loop and retry-storm detection.
 - Estimated, attempted, blocked, and actual usage accounting.
 - Method filtering so non-AI SDK calls are not charged.
@@ -558,7 +558,7 @@ npm run typecheck
 npm test
 npm run smoke
 npm run benchmark
-npm run benchmark:tokens
+npm run benchmark:tokensaicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b
 npm audit --omit=dev
 npm pack --dry-run
 ```
