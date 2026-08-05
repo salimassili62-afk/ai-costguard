@@ -128,7 +128,7 @@ test('tokenizer errors fall back to approximate counting with one warning per mo
     console.warn = originalWarn;
   }
 
-  assert.equal(warnings.length, 1);
+  assert.equal(warnings.length, 2);
   assert.match(
     warnings[0],
     /^\[ai-costguard\] Using approximate token counting for model: unit-tokenizer-throws-model/

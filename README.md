@@ -477,7 +477,7 @@ AI CostGuard does not include license-key checks or local commercial-license enf
 
 AI CostGuard Free is the open-source npm package above: free forever, MIT licensed.
 
-**AI CostGuard Pro Self-Serve** is a `$49` one-time production setup kit for teams taking Node.js AI agents into production. Lemon Squeezy handles purchase, receipts, and downloads. The npm package does not perform runtime license-key enforcement.
+**AI CostGuard Pro Self-Serve** is a `$99` one-time production setup kit for teams taking Node.js AI agents into production. Lemon Squeezy handles purchase, receipts, and downloads. The npm package does not perform runtime license-key enforcement.
 
 Current production-kit materials include:
 
@@ -493,7 +493,7 @@ Future kit updates may include multi-tenant examples, tokenizer adapter recipes,
 
 No runtime license-key enforcement. No private npm package. No SaaS backend. You get a downloadable folder of setup materials and examples that use the public package API. Use environment variables or your deployment secret manager for provider keys, `REDIS_URL`, and webhook URLs; never hardcode secrets.
 
-[Get AI CostGuard Pro →](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
+[Get AI CostGuard Pro →](https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b)
 
 ## CLI
 
@@ -558,7 +558,7 @@ npm run typecheck
 npm test
 npm run smoke
 npm run benchmark
-npm run benchmark:tokensaicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b
+npm run benchmark:tokens
 npm audit --omit=dev
 npm pack --dry-run
 ```

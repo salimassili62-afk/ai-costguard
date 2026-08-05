@@ -1,6 +1,6 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "Local-first runtime safety layer for AI agents that blocks runaway costs, loops, retries, and budget overruns before API calls execute.",
   "type": "module",
   "main": "./dist/index.js",
@@ -63,6 +63,14 @@
   ],
   "author": "Salim Assili",
   "license": "MIT",
+  "homepage": "https://github.com/salimassili62-afk/ai-costguard#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/salimassili62-afk/ai-costguard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/salimassili62-afk/ai-costguard/issues"
+  },
   "engines": {
     "node": ">=18"
   },
