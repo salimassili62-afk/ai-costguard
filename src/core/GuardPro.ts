@@ -1,4 +1,3 @@
-import { Redis } from 'ioredis';
 import { sendCostGuardAlert } from './alerts.js';
 import { GuardError } from './GuardCore.js';
 import type {
@@ -9,6 +8,70 @@ import type {
   RequestContext,
 } from './types.js';
 import { notifyBlockWebhooks } from './webhooks.js';
+import { validateLicense, type LicenseResult } from '../license/validator.js';
+
+function createLazyRedisClient(redisUrl: string): GuardProRedisClient {
+  let client: GuardProRedisClient | null = null;
+  const queuedListeners: Array<['ready' | 'error' | 'close', () => void]> = [];
+
+  async function loadClient(): Promise<GuardProRedisClient> {
+    if (client) {
+      return client;
+    }
+
+    const imported = await import('ioredis').catch(() => {
+      throw new Error(
+        '[AI CostGuard Pro] Redis support requires ioredis. ' +
+          'Run: npm install ioredis'
+      );
+    });
+
+    const Redis = (imported as any).default ?? imported;
+    const redis = new Redis(redisUrl, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      retryStrategy: () => null,
+    });
+
+    for (const [eventName, handler] of queuedListeners) {
+      redis.on?.(eventName, handler);
+    }
+
+    client = redis;
+    return client as GuardProRedisClient;
+  }
+
+  return {
+    on(eventName, handler) {
+      if (client) {
+        return client.on?.(eventName, handler);
+      }
+      queuedListeners.push([eventName, handler]);
+      return undefined;
+    },
+    async connect() {
+      const redis = await loadClient();
+      await redis.connect?.();
+      return redis;
+    },
+    async eval(script, keys, key, amount, ttlSeconds, budget) {
+      const redis = await loadClient();
+      return redis.eval(script, keys, key, amount, ttlSeconds, budget);
+    },
+    async get(key) {
+      const redis = await loadClient();
+      return redis.get(key);
+    },
+    async del(key) {
+      const redis = await loadClient();
+      return redis.del(key);
+    },
+    async quit() {
+      if (!client) return undefined;
+      return client.quit?.();
+    },
+  };
+}
 
 interface NormalizedBudget {
   maxUsd: number;
@@ -63,6 +126,8 @@ export interface GuardProConfig {
   discordWebhook?: string;
   /** Combined webhook configuration. */
   webhooks?: GuardWebhookConfig;
+  /** Optional Lemon Squeezy license key used to activate GuardPro. */
+  licenseKey?: string;
   /** Optional Redis-compatible client. When omitted, GuardPro pools ioredis clients by URL. */
   redisClient?: GuardProRedisClient;
 }
@@ -97,6 +162,7 @@ export class GuardPro {
   private readonly webhooks?: GuardWebhookConfig;
   private readonly localSpend = new Map<string, LocalSpendRecord>();
   private readonly thresholdAlertedKeys = new Set<string>();
+  private readonly _licenseCheck: Promise<LicenseResult>;
   private directRedisFailed = false;
   private directRedisReady = false;
 
@@ -105,6 +171,17 @@ export class GuardPro {
    */
   constructor(config: GuardProConfig) {
     const budget = normalizeBudget(config.budget);
+
+    const key = config.licenseKey ?? process.env.COSTGUARD_PRO_KEY;
+    if (!key || !key.trim()) {
+      throw new GuardError(
+        '[AI CostGuard Pro] A license key is required.\n' +
+          'Purchase at: https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b\n' +
+          'Then pass licenseKey to GuardPro or set COSTGUARD_PRO_KEY in your environment.'
+      );
+    }
+
+    this._licenseCheck = validateLicense(key.trim());
 
     this.redisUrl = config.redisUrl;
     this.budget = budget.maxUsd;
@@ -131,10 +208,20 @@ export class GuardPro {
     }
   }
 
-  /**
-   * Atomically charges estimated spend for a project and throws GuardError when budget is exceeded.
-   */
+
+  private async ensureLicensed(): Promise<void> {
+    const result = await this._licenseCheck;
+    if (!result.valid) {
+      throw new GuardError(
+        `[AI CostGuard Pro] License key rejected: ${result.reason}\n` +
+          'Purchase at: https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b'
+      );
+    }
+  }
+
   async checkAndCharge(projectId: string, estimatedCost: number): Promise<void> {
+    await this.ensureLicensed();
+
     if (!projectId.trim()) {
       throw new Error('GuardPro projectId must be a non-empty string');
     }
@@ -167,10 +254,9 @@ export class GuardPro {
     this.alertThresholdIfNeeded(projectId, decision.total);
   }
 
-  /**
-   * Returns current spend for a project from Redis when available, otherwise from local fallback state.
-   */
   async getSpend(projectId: string): Promise<number> {
+    await this.ensureLicensed();
+
     const redis = await this.getUsableRedis();
     if (redis) {
       try {
@@ -184,10 +270,9 @@ export class GuardPro {
     return this.getLocal(projectId).total;
   }
 
-  /**
-   * Resets spend for a project in Redis when available and always clears local fallback state.
-   */
   async resetSpend(projectId: string): Promise<void> {
+    await this.ensureLicensed();
+
     this.localSpend.delete(projectId);
 
     const redis = await this.getUsableRedis();
@@ -234,11 +319,7 @@ export class GuardPro {
     }
 
     const entry: RedisPoolEntry = {
-      client: new Redis(redisUrl, {
-        lazyConnect: true,
-        enableOfflineQueue: false,
-        retryStrategy: () => null,
-      }),
+      client: createLazyRedisClient(redisUrl),
       refs: 1,
       connected: false,
     };

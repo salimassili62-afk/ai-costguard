@@ -1,5 +1,28 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
+
+const TEST_LICENSE_KEY = process.env.COSTGUARD_PRO_KEY ?? 'test-key';
+process.env.COSTGUARD_PRO_KEY = TEST_LICENSE_KEY;
+
+const TEST_HOME = path.join(process.cwd(), '.test-home');
+const TEST_CACHE_DIR = path.join(TEST_HOME, '.ai-costguard');
+process.env.COSTGUARD_LICENSE_CACHE_DIR = TEST_CACHE_DIR;
+
+await fs.mkdir(TEST_CACHE_DIR, { recursive: true });
+await fs.writeFile(
+  path.join(TEST_CACHE_DIR, 'license-cache.json'),
+  JSON.stringify({
+    key: TEST_LICENSE_KEY,
+    valid: true,
+    activatedAt: new Date().toISOString(),
+    instanceId: 'test',
+    cachedAt: Date.now(),
+  }),
+  'utf8'
+);
 
 import { GuardError } from '../dist/index.js';
 import { GuardPro, getProGuard } from '../dist/pro.js';
@@ -115,7 +138,25 @@ test('GuardPro falls back when Redis returns an invalid total', async () => {
 });
 
 test('GuardPro factory creates guards', () => {
-  assert.ok(getProGuard({ redisUrl: 'redis://unit', budget: 1 }) instanceof GuardPro);
+  assert.ok(getProGuard({ redisUrl: 'redis://unit', budget: 1, licenseKey: 'test-key' }) instanceof GuardPro);
+});
+
+test('GuardPro requires a license key', () => {
+  const originalKey = process.env.COSTGUARD_PRO_KEY;
+  delete process.env.COSTGUARD_PRO_KEY;
+
+  try {
+    assert.throws(
+      () => new GuardPro({ redisUrl: 'redis://unit', budget: 1, windowSeconds: 60 }),
+      /A license key is required/,
+    );
+  } finally {
+    if (originalKey !== undefined) {
+      process.env.COSTGUARD_PRO_KEY = originalKey;
+    } else {
+      delete process.env.COSTGUARD_PRO_KEY;
+    }
+  }
 });
 
 test('GuardPro blocked call triggers one raw webhook alert and still throws GuardError', async () => {

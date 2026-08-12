@@ -442,6 +442,11 @@ app.post('/chat', async (req, res, next) => {
 });
 ```
 
+> **AI CostGuard Pro requires a license key.**
+> [Purchase here ($99 one-time)](https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b)
+> Set `COSTGUARD_PRO_KEY=your-key` in your environment, or pass
+> `licenseKey` directly to the constructor.
+
 ## Optional Redis / Pro Helper
 
 Redis-backed shared spend tracking is isolated behind a subpath import:
@@ -449,29 +454,19 @@ Redis-backed shared spend tracking is isolated behind a subpath import:
 ```ts
 import { GuardPro } from '@salimassili/ai-costguard/pro';
 
+// License key required — purchase at aicostguard.lemonsqueezy.com
 const pro = new GuardPro({
-  redisUrl: process.env.REDIS_URL ?? '',
-  budget: { maxUsd: 25, thresholdPercent: 0.8 },
-  windowSeconds: 86400,
-  projectId: 'production-agent',
-  runId: process.env.DEPLOYMENT_ID,
-  alerts: {
-    webhookUrl: process.env.COSTGUARD_WEBHOOK_URL,
-    events: ['blocked', 'threshold'],
-    timeoutMs: 1500,
-    format: 'slack',
-  },
+  licenseKey: process.env.COSTGUARD_PRO_KEY,
+  budget: { maxUsd: 1.0, windowSeconds: 60 },
+  redisUrl: process.env.REDIS_URL,
 });
-
-await pro.checkAndCharge('production', 0.0042);
-await pro.shutdown();
 ```
 
 `checkAndCharge()` only persists allowed spend. If a charge would exceed the budget, `GuardPro` throws `GuardError` and leaves the stored Redis/local spend at the previous allowed total.
 
 `ioredis` is an optional dependency and is not loaded by the root import.
 
-AI CostGuard does not include license-key checks or local commercial-license enforcement.
+AI CostGuard now performs runtime license-key validation for GuardPro.
 
 ## AI CostGuard Pro
 

@@ -18,3 +18,8 @@ zip-test-final/
 .ai-costguard/
 .ai-execution-firewall/
 .DS_Store
+
+# Environment variables
+.env
+.env.*
+!.env.example

@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.2.3] - 2026-08-11
+
+### Added
+- License key enforcement for GuardPro — requires valid Lemon Squeezy key to initialize
+- Local license cache (7-day validity) with offline grace period
+- COSTGUARD_LICENSE_CACHE_DIR env var for custom cache location
+
+### Changed
+- ioredis is now loaded dynamically to prevent crash when optional dependency is absent
+
+### Fixed
+- Restored codebase from GitHub after hardware failure
+- Archived legacy pro-v0.1 content under _archive
+
+## 2.2.3 - 2026-08-11
+
+### Fixed
+- Restored full codebase from GitHub after hardware failure
+- Archived legacy `pro-v0.1` starter content under `_archive`
+- Made `ioredis` import dynamic (see Changed)
+
+### Changed
+- `ioredis` is now loaded dynamically inside `GuardPro` to prevent crash
+  when optional dependency is absent (`--no-optional` installs)
+
+### Security
+- `GuardPro` now requires a valid Lemon Squeezy license key to initialize
+- License is verified against Lemon Squeezy API on first use and cached
+  locally for 7 days; works offline within the grace period
+- No key or invalid key throws `GuardError` with the purchase URL
+
+### Notes
+- No breaking changes from 2.2.2
+- Public API is unchanged
+
 ## 2.2.0 - 2026-07-03
 
 ### Fixed

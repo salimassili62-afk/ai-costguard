@@ -154,6 +154,54 @@ export interface GuardConfig {
 }
 
 /**
+ * Minimal Redis client surface used by GuardPro. Supplying redisClient is useful for tests.
+ */
+export interface GuardProRedisClient {
+  /** Optional connection status exposed by ioredis-compatible clients. */
+  status?: string;
+  /** Registers a connection event handler. */
+  on?(eventName: 'ready' | 'error' | 'close', handler: () => void): unknown;
+  /** Opens the Redis connection when the client is lazy. */
+  connect?(): Promise<unknown>;
+  /** Evaluates the atomic spend decision Lua script. */
+  eval(script: string, keys: number, key: string, amount: string, ttlSeconds: string, budget: string): Promise<unknown>;
+  /** Reads the current spend value. */
+  get(key: string): Promise<string | null>;
+  /** Deletes a spend key. */
+  del(key: string): Promise<unknown>;
+  /** Closes the connection. */
+  quit?(): Promise<unknown>;
+}
+
+/**
+ * Configuration for Redis-backed budget enforcement.
+ */
+export interface GuardProConfig {
+  /** Redis connection URL. Instances sharing this URL reuse one pooled connection. */
+  redisUrl: string;
+  /** Budget in USD for each project/session window. */
+  budget: number | GuardBudgetConfig;
+  /** Session TTL in seconds. Defaults to 86400. */
+  windowSeconds?: number;
+  /** Default project identifier used in alert payloads when checkAndCharge supplies a project key. */
+  projectId?: string;
+  /** Agent run identifier used in alert payloads. */
+  runId?: string;
+  /** Local webhook alerts for block and threshold events. Disabled unless webhookUrl is supplied. */
+  alerts?: CostGuardAlertsConfig;
+  /** Slack webhook URL for budget block notifications. */
+  slackWebhook?: string;
+  /** Discord webhook URL for budget block notifications. */
+  discordWebhook?: string;
+  /** Combined webhook configuration. */
+  webhooks?: GuardWebhookConfig;
+  /** Optional Lemon Squeezy license key used to activate GuardPro. */
+  licenseKey?: string;
+  /** Optional Redis-compatible client. When omitted, GuardPro pools ioredis clients by URL. */
+  redisClient?: GuardProRedisClient;
+}
+
+/**
  * Normalized request data evaluated before an AI API call is allowed.
  */
 export interface RequestContext {
