@@ -71,6 +71,15 @@
   "bugs": {
     "url": "https://github.com/salimassili62-afk/ai-costguard/issues"
   },
+  "jest": {
+    "coverageThreshold": {
+      "global": {
+        "statements": 89,
+        "branches": 81,
+        "functions": 89
+      }
+    }
+  },
   "engines": {
     "node": ">=18"
   },
