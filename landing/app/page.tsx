@@ -99,7 +99,7 @@ Local-first AI agent cost protection </p>
           rel="noopener noreferrer"
           className="rounded-lg bg-orange-600 px-7 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-orange-700"
         >
-          Buy Pro - $49 one-time
+          Buy Pro - $99 one-time
         </a>
 
         <a
@@ -163,7 +163,7 @@ Local-first AI agent cost protection </p>
 
         <PlanCard
           title="Pro"
-          subtitle="AI CostGuard Pro Self-Serve - $49 one-time"
+          subtitle="AI CostGuard Pro Self-Serve - $99 one-time"
           items={proFeatures}
           ctaHref={PRO_CHECKOUT_URL}
           ctaText="Buy Pro"
@@ -224,7 +224,7 @@ Local-first AI agent cost protection </p>
         rel="noopener noreferrer"
         className="inline-block rounded-lg bg-orange-600 px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-orange-700"
       >
-        Buy Pro - $49 one-time
+        Buy Pro - $99 one-time
       </a>
     </div>
   </section>
