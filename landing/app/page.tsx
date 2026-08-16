@@ -228,6 +228,14 @@ Local-first AI agent cost protection </p>
       </a>
     </div>
   </section>
+
+  <footer className="container mx-auto px-4 py-8 text-center text-sm text-gray-400">
+    <div className="mx-auto max-w-3xl">
+      <a href="/privacy" className="underline">Privacy</a>
+      <span className="mx-2">•</span>
+      <a href="/terms" className="underline">Terms</a>
+    </div>
+  </footer>
 </main>
 
 )
