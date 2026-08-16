@@ -10,7 +10,7 @@ const demoCommands = [
 ]
 
 const PRO_CHECKOUT_URL =
-'https://aicostguard.lemonsqueezy.com/checkout/buy/a2e55548-2e53-41c2-ad8d-69efc84b8a4b'
+'https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b'
 
 const GITHUB_URL = 'https://github.com/salimassili62-afk/ai-costguard'
 const NPM_URL = 'https://www.npmjs.com/package/@salimassili/ai-costguard'
