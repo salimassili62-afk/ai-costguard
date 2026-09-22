@@ -8,7 +8,6 @@ import type {
   RequestContext,
 } from './types.js';
 import { notifyBlockWebhooks } from './webhooks.js';
-import { validateLicense, type LicenseResult } from '../license/validator.js';
 
 function createLazyRedisClient(redisUrl: string): GuardProRedisClient {
   let client: GuardProRedisClient | null = null;
@@ -126,8 +125,8 @@ export interface GuardProConfig {
   discordWebhook?: string;
   /** Combined webhook configuration. */
   webhooks?: GuardWebhookConfig;
-  /** Optional Lemon Squeezy license key used to activate GuardPro. */
-  licenseKey?: string;
+  /** Explicitly permits unsafe process-local fallback when Redis is unavailable. Defaults to false. */
+  allowLocalFallback?: boolean;
   /** Optional Redis-compatible client. When omitted, GuardPro pools ioredis clients by URL. */
   redisClient?: GuardProRedisClient;
 }
@@ -145,7 +144,7 @@ interface RedisPoolEntry {
 }
 
 /**
- * Redis-backed budget guard with local fallback when Redis is unavailable.
+ * Redis-backed budget guard that fails closed when shared enforcement is unavailable.
  */
 export class GuardPro {
   private static readonly pools = new Map<string, RedisPoolEntry>();
@@ -160,9 +159,9 @@ export class GuardPro {
   private readonly runId?: string;
   private readonly alerts?: CostGuardAlertsConfig;
   private readonly webhooks?: GuardWebhookConfig;
+  private readonly allowLocalFallback: boolean;
   private readonly localSpend = new Map<string, LocalSpendRecord>();
   private readonly thresholdAlertedKeys = new Set<string>();
-  private readonly _licenseCheck: Promise<LicenseResult>;
   private directRedisFailed = false;
   private directRedisReady = false;
 
@@ -170,25 +169,30 @@ export class GuardPro {
    * Creates a GuardPro instance and reuses a pooled Redis connection for the same URL.
    */
   constructor(config: GuardProConfig) {
+    if (!config || typeof config !== 'object') {
+      throw proConfigError('GuardPro config must be an object');
+    }
+    if (typeof config.redisUrl !== 'string') {
+      throw proConfigError('GuardPro redisUrl must be a string');
+    }
     const budget = normalizeBudget(config.budget);
 
-    const key = config.licenseKey ?? process.env.COSTGUARD_PRO_KEY;
-    if (!key || !key.trim()) {
+    const windowSeconds = config.windowSeconds ?? 86_400;
+    if (!Number.isFinite(windowSeconds) || windowSeconds <= 0) {
       throw new GuardError(
-        '[AI CostGuard Pro] A license key is required.\n' +
-          'Purchase at: https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b\n' +
-          'Then pass licenseKey to GuardPro or set COSTGUARD_PRO_KEY in your environment.'
+        'GuardPro windowSeconds must be a finite number greater than 0',
+        undefined,
+        'CONFIG_INVALID'
       );
     }
-
-    this._licenseCheck = validateLicense(key.trim());
 
     this.redisUrl = config.redisUrl;
     this.budget = budget.maxUsd;
     this.budgetThresholdUsd = budget.thresholdUsd;
-    this.windowSeconds = config.windowSeconds ?? 86_400;
+    this.windowSeconds = windowSeconds;
     this.projectId = readString(config.projectId);
     this.runId = readString(config.runId);
+    this.allowLocalFallback = config.allowLocalFallback === true;
     this.alerts = normalizeAlerts(config.alerts);
     this.webhooks = {
       ...config.webhooks,
@@ -209,29 +213,21 @@ export class GuardPro {
   }
 
 
-  private async ensureLicensed(): Promise<void> {
-    const result = await this._licenseCheck;
-    if (!result.valid) {
-      throw new GuardError(
-        `[AI CostGuard Pro] License key rejected: ${result.reason}\n` +
-          'Purchase at: https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b'
-      );
-    }
-  }
-
   async checkAndCharge(projectId: string, estimatedCost: number): Promise<void> {
-    await this.ensureLicensed();
-
-    if (!projectId.trim()) {
-      throw new Error('GuardPro projectId must be a non-empty string');
+    if (typeof projectId !== 'string' || !projectId.trim()) {
+      throw proConfigError('GuardPro projectId must be a non-empty string');
     }
 
     if (!Number.isFinite(estimatedCost) || estimatedCost < 0) {
-      throw new Error('GuardPro estimatedCost must be a finite non-negative number');
+      throw proConfigError('GuardPro estimatedCost must be a finite non-negative number');
     }
 
     const key = this.getSpendKey(projectId);
     const redis = await this.getUsableRedis();
+    if (!redis && !this.allowLocalFallback) {
+      throw this.sharedBudgetUnavailable(projectId);
+    }
+
     const decision = redis
       ? await this.chargeRedisOrFallback(redis, key, projectId, estimatedCost)
       : this.chargeLocal(projectId, estimatedCost);
@@ -255,9 +251,14 @@ export class GuardPro {
   }
 
   async getSpend(projectId: string): Promise<number> {
-    await this.ensureLicensed();
+    if (typeof projectId !== 'string' || !projectId.trim()) {
+      throw proConfigError('GuardPro projectId must be a non-empty string');
+    }
 
     const redis = await this.getUsableRedis();
+    if (!redis && !this.allowLocalFallback) {
+      throw this.sharedBudgetUnavailable(projectId);
+    }
     if (redis) {
       try {
         const value = await redis.get(this.getSpendKey(projectId));
@@ -271,11 +272,16 @@ export class GuardPro {
   }
 
   async resetSpend(projectId: string): Promise<void> {
-    await this.ensureLicensed();
+    if (typeof projectId !== 'string' || !projectId.trim()) {
+      throw proConfigError('GuardPro projectId must be a non-empty string');
+    }
 
     this.localSpend.delete(projectId);
 
     const redis = await this.getUsableRedis();
+    if (!redis && !this.allowLocalFallback) {
+      throw this.sharedBudgetUnavailable(projectId);
+    }
     if (!redis) return;
 
     try {
@@ -394,8 +400,19 @@ export class GuardPro {
       return await this.chargeRedis(redis, key, estimatedCost);
     } catch {
       this.markDisconnected();
+      if (!this.allowLocalFallback) {
+        throw this.sharedBudgetUnavailable(projectId);
+      }
       return this.chargeLocal(projectId, estimatedCost);
     }
+  }
+
+  private sharedBudgetUnavailable(projectId: string): GuardError {
+    return new GuardError(
+      `Shared budget enforcement is unavailable for project "${projectId}".`,
+      this.createContext(projectId, 0),
+      'SHARED_BUDGET_UNAVAILABLE'
+    );
   }
 
   private async chargeRedis(redis: GuardProRedisClient, key: string, estimatedCost: number): Promise<ChargeDecision> {
@@ -492,6 +509,7 @@ export class GuardPro {
   private createContext(projectId: string, estimatedCost: number): RequestContext {
     return {
       model: 'unknown',
+      pricingKnown: false,
       tokens: 0,
       inputTokens: 0,
       outputTokens: 0,
@@ -550,6 +568,10 @@ function normalizeBudget(configBudget: GuardProConfig['budget']): NormalizedBudg
     return { maxUsd: validateMoney(configBudget, 'budget') };
   }
 
+  if (!configBudget || typeof configBudget !== 'object') {
+    throw proConfigError('budget must be a non-negative number or { maxUsd } object');
+  }
+
   const maxUsd = validateMoney(configBudget.maxUsd, 'budget.maxUsd');
   const thresholdUsd =
     configBudget.thresholdUsd === undefined
@@ -557,7 +579,7 @@ function normalizeBudget(configBudget: GuardProConfig['budget']): NormalizedBudg
       : validateMoney(configBudget.thresholdUsd, 'budget.thresholdUsd');
 
   if (thresholdUsd !== undefined && thresholdUsd > maxUsd) {
-    throw new Error('budget threshold must be less than or equal to budget.maxUsd');
+    throw proConfigError('budget threshold must be less than or equal to budget.maxUsd');
   }
 
   return { maxUsd, thresholdUsd };
@@ -566,7 +588,7 @@ function normalizeBudget(configBudget: GuardProConfig['budget']): NormalizedBudg
 function normalizeThresholdPercent(value: unknown, maxUsd: number): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1) {
-    throw new Error('budget.thresholdPercent must be a number greater than 0 and less than or equal to 1');
+    throw proConfigError('budget.thresholdPercent must be a number greater than 0 and less than or equal to 1');
   }
   return maxUsd * value;
 }
@@ -575,16 +597,16 @@ function normalizeAlerts(alerts: GuardProConfig['alerts']): CostGuardAlertsConfi
   if (!alerts) return undefined;
 
   if (alerts.timeoutMs !== undefined && (!Number.isFinite(alerts.timeoutMs) || alerts.timeoutMs < 0)) {
-    throw new Error('alerts.timeoutMs must be a non-negative number');
+    throw proConfigError('alerts.timeoutMs must be a non-negative number');
   }
 
   if (alerts.format !== undefined && alerts.format !== 'json' && alerts.format !== 'slack') {
-    throw new Error('alerts.format must be "json" or "slack"');
+    throw proConfigError('alerts.format must be "json" or "slack"');
   }
 
   for (const event of alerts.events ?? []) {
     if (event !== 'blocked' && event !== 'threshold') {
-      throw new Error('alerts.events can only include "blocked" or "threshold"');
+      throw proConfigError('alerts.events can only include "blocked" or "threshold"');
     }
   }
 
@@ -600,9 +622,13 @@ function readString(value: unknown): string | undefined {
 
 function validateMoney(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    throw new Error(`${field} must be a non-negative finite number`);
+    throw proConfigError(`${field} must be a non-negative finite number`);
   }
   return value;
+}
+
+function proConfigError(message: string): GuardError {
+  return new GuardError(message, undefined, 'CONFIG_INVALID');
 }
 
 function parseRedisChargeDecision(result: unknown): ChargeDecision {

@@ -14,6 +14,8 @@ const openai = guard(client, {
 });
 ```
 
+The server binds to `127.0.0.1` by default. Non-loopback binding is refused unless the caller explicitly opts in with `allowRemote: true` or the CLI `--allow-remote` flag. The dashboard has no authentication, so do not expose it to an untrusted network.
+
 Start the dashboard:
 
 ```bash

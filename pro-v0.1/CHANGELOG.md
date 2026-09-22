@@ -11,4 +11,4 @@ Initial Redis-focused Pro starter.
 
 ### Notes
 
-All examples use the `@salimassili/ai-costguard` v2.1.x public API. There is no private package or runtime license-key enforcement. Add future Pro materials to this folder before advertising them as shipped.
+All examples use the `@salimassili/ai-costguard` v2.1.x public API. There is no private package or commercial-license enforcement. The canonical current guide is `../docs/PRO.md`.

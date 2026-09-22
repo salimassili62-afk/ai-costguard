@@ -75,6 +75,13 @@ test('dashboard server exposes local summary JSON', async () => {
   }
 });
 
+test('dashboard refuses non-loopback binding without explicit opt-in', async () => {
+  await assert.rejects(
+    () => startDashboardServer({ host: '0.0.0.0', port: 0 }),
+    /allowRemote.*authentication/u
+  );
+});
+
 test('dashboard summary includes actual provider usage recorded after allow events', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'costguard-dashboard-actual-'));
   const eventLogPath = join(directory, 'events.jsonl');

@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
 const examples = [
+  'examples/integrations/quick-demo.mjs',
   'examples/integrations/openai-agent-loop.mjs',
   'examples/integrations/anthropic-workflow-budget.mjs',
   'examples/integrations/vercel-ai-chatbot.mjs',

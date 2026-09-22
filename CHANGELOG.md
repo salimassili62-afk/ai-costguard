@@ -1,39 +1,22 @@
 # Changelog
 
-## [2.2.3] - 2026-08-11
-
-### Added
-- License key enforcement for GuardPro — requires valid Lemon Squeezy key to initialize
-- Local license cache (7-day validity) with offline grace period
-- COSTGUARD_LICENSE_CACHE_DIR env var for custom cache location
-
-### Changed
-- ioredis is now loaded dynamically to prevent crash when optional dependency is absent
+## [2.2.3] - 2026-08-23
 
 ### Fixed
-- Restored codebase from GitHub after hardware failure
-- Archived legacy pro-v0.1 content under _archive
-
-## 2.2.3 - 2026-08-11
-
-### Fixed
-- Restored full codebase from GitHub after hardware failure
-- Archived legacy `pro-v0.1` starter content under `_archive`
-- Made `ioredis` import dynamic (see Changed)
+- Removed runtime license-key enforcement from `GuardPro`; the public Pro helper now works without a key.
+- Added a 3-second timeout to remote license validation and strict seven-day cache expiry for legacy validation code.
+- Added `CONFIG_INVALID` errors for unsafe GuardCore and GuardPro configuration values.
+- Refreshed built-in pricing verification dates and added the canonical `docs/PRO.md` production guide.
+- Added the package CLI to both starter templates' development dependencies.
+- Aligned Pro pricing and checkout links across README, landing, marketing, and kit materials.
 
 ### Changed
-- `ioredis` is now loaded dynamically inside `GuardPro` to prevent crash
-  when optional dependency is absent (`--no-optional` installs)
-
-### Security
-- `GuardPro` now requires a valid Lemon Squeezy license key to initialize
-- License is verified against Lemon Squeezy API on first use and cached
-  locally for 7 days; works offline within the grace period
-- No key or invalid key throws `GuardError` with the purchase URL
+- Exact registered tokenizers now have explicit coverage confirming they do not emit approximate-count warnings.
+- Archived Pro starter materials now point to `docs/PRO.md` as the canonical guide.
 
 ### Notes
-- No breaking changes from 2.2.2
-- Public API is unchanged
+- This release note is the draft for the v2.2.3 GitHub release.
+- The repository's public API remains compatible with 2.2.2.
 
 ## 2.2.0 - 2026-07-03
 
@@ -44,7 +27,7 @@
 
 ### Changed
 
-- Aligned release-facing Pro copy around the current `$49` one-time production setup kit.
+- Aligned release-facing Pro copy around the then-current `$49` one-time production setup kit; the current offer is documented separately as the `$199` Production Kit.
 - Updated starter template dependencies to `@salimassili/ai-costguard` `^2.2.0`.
 - Recalibrated the built-in zero-dependency token estimator with simple model-family and text-shape heuristics.
 - Improved the fixed proxy token benchmark from `237.76%` average error to `9.68%` average error while keeping `registerTokenizer()` as the recommended exact-counting path.

@@ -1,4 +1,5 @@
-import { getPricing } from '../pricing/index.js';
+import { getPricing, validatePricing } from '../pricing/index.js';
+import type { ModelPricing } from '../pricing/index.js';
 import { sendCostGuardAlert } from './alerts.js';
 import { appendGuardEventLog } from './event-log.js';
 import { GuardEventEmitter } from './events.js';
@@ -25,6 +26,7 @@ const DEFAULT_LOOP_THRESHOLD = 0.85;
 const DEFAULT_LOOP_MIN_REPEATS = 2;
 const DEFAULT_LOOP_WINDOW_SIZE = 5;
 const DEFAULT_RETRY_THRESHOLD = 2;
+const DEFAULT_MAX_SCOPES = 10_000;
 const DEFAULT_GUARDED_METHODS = [
   'chat.completions.create',
   'completions.create',
@@ -45,6 +47,7 @@ interface NormalizedGuardConfig {
   budgetThresholdUsd?: number;
   behaviorAnalysis: boolean;
   maxHistory: number;
+  maxScopes: number;
   historyTtlMs: number;
   maxSteps?: number;
   loopSimilarityThreshold: number;
@@ -141,11 +144,15 @@ export class GuardCore {
   private readonly emitter = new GuardEventEmitter();
   private readonly approximateTokenWarnings = new Set<string>();
   private readonly thresholdAlertedScopes = new Set<string>();
+  private readonly reconciledContexts = new WeakSet<RequestContext>();
 
   /**
    * Creates a process-local guard evaluator.
    */
   constructor(config: GuardConfig = {}, sharedState: GuardState = createGuardState()) {
+    if (!config || typeof config !== 'object') {
+      throw new GuardError('GuardCore config must be an object', undefined, 'CONFIG_INVALID');
+    }
     const loopSimilarityThreshold =
       config.loopDetection?.similarityThreshold ?? config.loopSimilarityThreshold ?? DEFAULT_LOOP_THRESHOLD;
     const loopMinRepeats = config.loopDetection?.minHistorySize ?? config.loopMinRepeats ?? DEFAULT_LOOP_MIN_REPEATS;
@@ -155,11 +162,48 @@ export class GuardCore {
     const budget = normalizeBudget(config.budget);
     const scope = normalizeConfigScope(config);
 
+    if (config.maxHistory !== undefined && (!Number.isFinite(config.maxHistory) || config.maxHistory <= 0)) {
+      throw new GuardError(
+        'GuardCore maxHistory must be a finite number greater than 0',
+        undefined,
+        'CONFIG_INVALID'
+      );
+    }
+    if (config.maxScopes !== undefined && (!Number.isFinite(config.maxScopes) || config.maxScopes < 1)) {
+      throw configError('GuardCore maxScopes must be a finite number greater than 0');
+    }
+    if (config.historyTtlMs !== undefined && (!Number.isFinite(config.historyTtlMs) || config.historyTtlMs < 0)) {
+      throw configError('GuardCore historyTtlMs must be a finite number greater than or equal to 0');
+    }
+    if (config.maxSteps !== undefined && (!Number.isFinite(config.maxSteps) || config.maxSteps < 1)) {
+      throw configError('GuardCore maxSteps must be a finite number greater than or equal to 1');
+    }
+    if (config.retryThreshold !== undefined && (!Number.isFinite(config.retryThreshold) || config.retryThreshold < 1)) {
+      throw configError('GuardCore retryThreshold must be a finite number greater than or equal to 1');
+    }
+    if (config.guardedMethods !== undefined &&
+        (!Array.isArray(config.guardedMethods) || config.guardedMethods.some((method) => typeof method !== 'string' || !method.trim()))) {
+      throw configError('GuardCore guardedMethods must be an array of non-empty strings');
+    }
+    if (config.unknownModelPolicy !== undefined && config.unknownModelPolicy !== 'block' && config.unknownModelPolicy !== 'fallback') {
+      throw configError('GuardCore unknownModelPolicy must be "block" or "fallback"');
+    }
+    if (config.eventLogPrompt !== undefined && config.eventLogPrompt !== 'none' && config.eventLogPrompt !== 'preview') {
+      throw configError('GuardCore eventLogPrompt must be "none" or "preview"');
+    }
+
+    validateConfiguredPricing(config.pricingOverrides, 'pricingOverrides');
+    validateConfiguredPricing(
+      config.unknownModelPolicy === 'fallback' && config.unknownModelPricing ? [config.unknownModelPricing] : [],
+      'unknownModelPricing'
+    );
+
     this.config = {
       budget: budget.maxUsd,
       budgetThresholdUsd: budget.thresholdUsd,
       behaviorAnalysis: config.behaviorAnalysis ?? true,
       maxHistory: config.maxHistory ?? DEFAULT_MAX_HISTORY,
+      maxScopes: Math.trunc(config.maxScopes ?? DEFAULT_MAX_SCOPES),
       historyTtlMs: Math.max(0, config.historyTtlMs ?? DEFAULT_HISTORY_TTL_MS),
       maxSteps: config.maxSteps,
       loopSimilarityThreshold,
@@ -225,6 +269,13 @@ export class GuardCore {
     const scope = this.extractScope(record);
     const scopeKey = createScopeKey(scope);
     const tokenEstimate = estimateRequestTokens(record);
+    if (tokenEstimate.outputTokens === undefined) {
+      throw new GuardError(
+        'A finite output token limit is required for safe pre-call estimation.',
+        undefined,
+        'OUTPUT_LIMIT_REQUIRED'
+      );
+    }
     if (tokenEstimate.approximate) {
       this.warnApproximateTokens(model, scopeKey);
     }
@@ -232,10 +283,16 @@ export class GuardCore {
     const pricing = registryPricing ?? (this.config.unknownModelPolicy === 'fallback' ? this.config.unknownModelPricing : undefined);
     const inputPer1kTokens = pricing?.inputPer1kTokens ?? 0;
     const outputPer1kTokens = pricing?.outputPer1kTokens ?? 0;
-    const estimatedCost = sanitizeMoney(
+    const estimatedCost =
       (tokenEstimate.inputTokens / 1000) * inputPer1kTokens +
-        (tokenEstimate.outputTokens / 1000) * outputPer1kTokens
-    );
+      (tokenEstimate.outputTokens / 1000) * outputPer1kTokens;
+    if (!Number.isFinite(estimatedCost) || estimatedCost < 0) {
+      throw new GuardError(
+        `Estimated cost for model "${model}" is not finite.`,
+        undefined,
+        'CONTEXT_INVALID'
+      );
+    }
     return {
       model,
       pricingKnown: pricing !== undefined,
@@ -248,6 +305,7 @@ export class GuardCore {
       timestamp: Date.now(),
       prompt: tokenEstimate.prompt.slice(0, 4000),
       method,
+      streaming: record.stream === true,
       scope,
       scopeKey,
     };
@@ -265,6 +323,14 @@ export class GuardCore {
 
     if (context.pricingKnown === false) {
       return this.block('UNKNOWN_MODEL', `No pricing found for model "${context.model}".`, context);
+    }
+
+    if (context.streaming) {
+      return this.block(
+        'STREAMING_UNSUPPORTED',
+        'Streaming requests are blocked because final provider usage cannot be reconciled safely.',
+        context
+      );
     }
 
     const budgetDecision = this.checkBudget(scope, context);
@@ -299,6 +365,7 @@ export class GuardCore {
    * Reconciles actual provider usage from OpenAI/Anthropic-like response objects when available.
    */
   recordActualUsage(context: RequestContext, response: unknown): void {
+    if (this.reconciledContexts.has(context)) return;
     if (!context.pricing) return;
 
     const usage = extractUsage(response);
@@ -312,6 +379,7 @@ export class GuardCore {
 
     if (!Number.isFinite(actualCost) || actualCost < 0) return;
 
+    this.reconciledContexts.add(context);
     context.actualCost = actualCost;
     this.state.actualCost += actualCost;
     const scope = this.getScopeState(context);
@@ -320,8 +388,8 @@ export class GuardCore {
   }
 
   private checkBudget(scope: GuardScopeState, context: RequestContext): string | undefined {
-    if (scope.totalCost + context.estimatedCost <= this.config.budget) return undefined;
-    return `Budget exceeded: estimated $${(scope.totalCost + context.estimatedCost).toFixed(6)} / $${this.config.budget.toFixed(6)}`;
+    if (scope.reservedCost + context.estimatedCost <= this.config.budget) return undefined;
+    return `Budget exceeded: estimated $${(scope.reservedCost + context.estimatedCost).toFixed(6)} / $${this.config.budget.toFixed(6)}`;
   }
 
   private checkMaxSteps(scope: GuardScopeState): string | undefined {
@@ -367,10 +435,12 @@ export class GuardCore {
 
   private recordAllowed(scope: GuardScopeState, context: RequestContext): void {
     this.state.requestCount += 1;
+    this.state.reservedCost += context.estimatedCost;
     this.state.totalCost += context.estimatedCost;
     this.state.lastRequestTime = Date.now();
 
     scope.requestCount += 1;
+    scope.reservedCost += context.estimatedCost;
     scope.totalCost += context.estimatedCost;
     scope.lastRequestTime = this.state.lastRequestTime;
 
@@ -435,6 +505,15 @@ export class GuardCore {
     if (existing) {
       hydrateScopeState(existing);
       return existing;
+    }
+
+    if (Object.keys(this.state.scopes).length >= this.config.maxScopes) {
+      throw new GuardError(
+        `Maximum process-local scope count exceeded: ${this.config.maxScopes}`,
+        context,
+        'SCOPE_LIMIT_EXCEEDED',
+        { scopeKey }
+      );
     }
 
     const fresh = createScopeState();
@@ -525,6 +604,7 @@ export function createGuardState(): GuardState {
 function createScopeState(): GuardScopeState {
   return {
     requestCount: 0,
+    reservedCost: 0,
     totalCost: 0,
     attemptedCost: 0,
     blockedCost: 0,
@@ -538,6 +618,7 @@ function createScopeState(): GuardScopeState {
 
 function hydrateScopeState(state: GuardScopeState): void {
   state.requestCount ??= 0;
+  state.reservedCost ??= state.totalCost ?? 0;
   state.totalCost ??= 0;
   state.attemptedCost ??= state.totalCost ?? 0;
   state.blockedCost ??= 0;
@@ -556,7 +637,7 @@ function normalizeBudget(configBudget: GuardConfig['budget']): NormalizedBudget 
   }
 
   if (!isRecord(configBudget)) {
-    throw new Error('budget must be a non-negative number or { maxUsd } object');
+    throw configError('budget must be a non-negative number or { maxUsd } object');
   }
 
   const maxUsd = validateMoney(configBudget.maxUsd, 'budget.maxUsd');
@@ -566,7 +647,7 @@ function normalizeBudget(configBudget: GuardConfig['budget']): NormalizedBudget 
       : validateMoney(configBudget.thresholdUsd, 'budget.thresholdUsd');
 
   if (thresholdUsd !== undefined && thresholdUsd > maxUsd) {
-    throw new Error('budget threshold must be less than or equal to budget.maxUsd');
+    throw configError('budget threshold must be less than or equal to budget.maxUsd');
   }
 
   return { maxUsd, thresholdUsd };
@@ -575,7 +656,7 @@ function normalizeBudget(configBudget: GuardConfig['budget']): NormalizedBudget 
 function normalizeThresholdPercent(value: unknown, maxUsd: number): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1) {
-    throw new Error('budget.thresholdPercent must be a number greater than 0 and less than or equal to 1');
+    throw configError('budget.thresholdPercent must be a number greater than 0 and less than or equal to 1');
   }
   return maxUsd * value;
 }
@@ -600,16 +681,16 @@ function normalizeAlerts(alerts: GuardConfig['alerts']): CostGuardAlertsConfig |
   if (!alerts) return undefined;
 
   if (alerts.timeoutMs !== undefined && (!Number.isFinite(alerts.timeoutMs) || alerts.timeoutMs < 0)) {
-    throw new Error('alerts.timeoutMs must be a non-negative number');
+    throw configError('alerts.timeoutMs must be a non-negative number');
   }
 
   if (alerts.format !== undefined && alerts.format !== 'json' && alerts.format !== 'slack') {
-    throw new Error('alerts.format must be "json" or "slack"');
+    throw configError('alerts.format must be "json" or "slack"');
   }
 
   for (const event of alerts.events ?? []) {
     if (event !== 'blocked' && event !== 'threshold') {
-      throw new Error('alerts.events can only include "blocked" or "threshold"');
+      throw configError('alerts.events can only include "blocked" or "threshold"');
     }
   }
 
@@ -621,27 +702,64 @@ function normalizeAlerts(alerts: GuardConfig['alerts']): CostGuardAlertsConfig |
 
 function validateLoopConfig(similarityThreshold: number, minHistorySize: number, windowSize: number): void {
   if (!Number.isFinite(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 1) {
-    throw new Error('loopDetection.similarityThreshold must be between 0 and 1');
+    throw configError('loopDetection.similarityThreshold must be between 0 and 1');
   }
 
   if (!Number.isFinite(minHistorySize) || minHistorySize < 1) {
-    throw new Error('loopDetection.minHistorySize must be at least 1');
+    throw configError('loopDetection.minHistorySize must be at least 1');
   }
 
   if (!Number.isFinite(windowSize) || windowSize < 1) {
-    throw new Error('loopDetection.windowSize must be at least 1');
+    throw configError('loopDetection.windowSize must be at least 1');
   }
 }
 
 function normalizeRequestContext(context: RequestContext): void {
+  if (!context || typeof context !== 'object') {
+    throw configError('Guard request context must be an object');
+  }
+
   context.model = readString(context.model) ?? 'unknown';
-  context.tokens = sanitizeCount(context.tokens);
-  context.inputTokens = context.inputTokens === undefined ? undefined : sanitizeCount(context.inputTokens);
-  context.outputTokens = context.outputTokens === undefined ? undefined : sanitizeCount(context.outputTokens);
-  context.estimatedCost = sanitizeMoney(context.estimatedCost);
-  context.actualCost = context.actualCost === undefined ? undefined : sanitizeMoney(context.actualCost);
-  context.timestamp = Number.isFinite(context.timestamp) ? context.timestamp : Date.now();
-  context.prompt = typeof context.prompt === 'string' ? context.prompt : '';
+  if (!Number.isFinite(context.tokens) || context.tokens < 0) {
+    throw contextError('Guard request context tokens must be a finite non-negative number');
+  }
+  if (context.inputTokens !== undefined && (!Number.isFinite(context.inputTokens) || context.inputTokens < 0)) {
+    throw contextError('Guard request context inputTokens must be a finite non-negative number');
+  }
+  if (context.outputTokens !== undefined && (!Number.isFinite(context.outputTokens) || context.outputTokens < 0)) {
+    throw contextError('Guard request context outputTokens must be a finite non-negative number');
+  }
+  if (!Number.isFinite(context.estimatedCost) || context.estimatedCost < 0) {
+    throw contextError('Guard request context estimatedCost must be a finite non-negative number');
+  }
+  if (context.actualCost !== undefined && (!Number.isFinite(context.actualCost) || context.actualCost < 0)) {
+    throw contextError('Guard request context actualCost must be a finite non-negative number');
+  }
+  if (!Number.isFinite(context.timestamp)) {
+    throw contextError('Guard request context timestamp must be finite');
+  }
+  if (typeof context.prompt !== 'string') {
+    throw contextError('Guard request context prompt must be a string');
+  }
+  if (context.pricingKnown !== true && context.pricingKnown !== false) {
+    throw contextError('Guard request context pricingKnown must be explicitly true or false');
+  }
+  if (context.pricingKnown && context.model === 'unknown') {
+    throw contextError('Guard request context cannot mark an unknown model as priced');
+  }
+  if (context.pricing) {
+    try {
+      validatePricing(context.pricing, 'request pricing');
+    } catch (error) {
+      throw contextError(error instanceof Error ? error.message : 'Guard request pricing is invalid');
+    }
+  }
+
+  context.scope = normalizeScope(context.scope);
+  context.scopeKey = context.scopeKey ?? createScopeKey(context.scope);
+  if (typeof context.scopeKey !== 'string' || context.scopeKey.length > 2048) {
+    throw contextError('Guard request context scopeKey must be a string no longer than 2048 characters');
+  }
 }
 
 function createEmptyContext(): RequestContext {
@@ -659,17 +777,33 @@ function createEmptyContext(): RequestContext {
 }
 
 function createScopeKey(scope: GuardScope | undefined): string {
-  const projectId = normalizeScopePart(scope?.projectId);
-  const userId = normalizeScopePart(scope?.userId);
-  const sessionId = normalizeScopePart(scope?.sessionId);
-  const runId = normalizeScopePart(scope?.runId);
-  if (!projectId && !userId && !sessionId && !runId) return 'default';
-  return `project:${projectId ?? '*'}|user:${userId ?? '*'}|session:${sessionId ?? '*'}|run:${runId ?? '*'}`;
+  const normalized = normalizeScope(scope);
+  if (!normalized) return 'default';
+  return JSON.stringify([
+    normalized.projectId ?? null,
+    normalized.userId ?? null,
+    normalized.sessionId ?? null,
+    normalized.runId ?? null,
+  ]);
 }
 
 function normalizeScopePart(value: string | undefined): string | undefined {
   const normalized = value?.trim();
+  if (normalized && normalized.length > 256) {
+    throw contextError('Guard scope identifiers must be no longer than 256 characters');
+  }
   return normalized ? normalized : undefined;
+}
+
+function normalizeScope(scope: GuardScope | undefined): GuardScope | undefined {
+  if (!scope) return undefined;
+  const normalized = {
+    projectId: normalizeScopePart(scope.projectId),
+    userId: normalizeScopePart(scope.userId),
+    sessionId: normalizeScopePart(scope.sessionId),
+    runId: normalizeScopePart(scope.runId),
+  };
+  return Object.values(normalized).some(Boolean) ? normalized : undefined;
 }
 
 function hasRetrySignal(prompt: string): boolean {
@@ -705,9 +839,27 @@ function readPositiveNumber(value: unknown): number | undefined {
 
 function validateMoney(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    throw new Error(`${field} must be a non-negative finite number`);
+    throw configError(`${field} must be a non-negative finite number`);
   }
   return value;
+}
+
+function configError(message: string): GuardError {
+  return new GuardError(message, undefined, 'CONFIG_INVALID');
+}
+
+function contextError(message: string): GuardError {
+  return new GuardError(message, undefined, 'CONTEXT_INVALID');
+}
+
+function validateConfiguredPricing(entries: readonly ModelPricing[] | undefined, field: string): void {
+  if (entries === undefined) return;
+  if (!Array.isArray(entries)) throw configError(`${field} must be an array`);
+  try {
+    for (const [index, entry] of entries.entries()) validatePricing(entry, `${field}[${index}]`);
+  } catch (error) {
+    throw configError(error instanceof Error ? error.message : `${field} contains invalid pricing`);
+  }
 }
 
 function sanitizeMoney(value: unknown): number {
@@ -726,8 +878,20 @@ function roundMoney(value: number): number {
 
 function codeToAlertReason(code: GuardErrorCode): string {
   switch (code) {
+    case 'CONFIG_INVALID':
+      return 'config_invalid';
+    case 'CONTEXT_INVALID':
+      return 'context_invalid';
     case 'UNKNOWN_MODEL':
       return 'unknown_model';
+    case 'OUTPUT_LIMIT_REQUIRED':
+      return 'output_limit_required';
+    case 'STREAMING_UNSUPPORTED':
+      return 'streaming_unsupported';
+    case 'SCOPE_LIMIT_EXCEEDED':
+      return 'scope_limit_exceeded';
+    case 'SHARED_BUDGET_UNAVAILABLE':
+      return 'shared_budget_unavailable';
     case 'BUDGET_EXCEEDED':
       return 'budget_exceeded';
     case 'MAX_STEPS_EXCEEDED':

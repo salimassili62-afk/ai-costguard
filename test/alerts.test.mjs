@@ -234,28 +234,19 @@ test('alert payloads redact prompts, secrets, request bodies, and webhook URLs',
   }
 });
 
-test('invalid budgets fail early and invalid manual estimated costs are sanitized', () => {
+test('invalid budgets and manual safety contexts fail early', () => {
   assert.throws(() => new GuardCore({ budget: Number.NaN }), /budget must be a non-negative finite number/u);
   assert.throws(() => new GuardCore({ budget: { maxUsd: -1 } }), /budget\.maxUsd/u);
   assert.throws(() => new GuardCore({ budget: { maxUsd: 1, thresholdPercent: 2 } }), /budget\.thresholdPercent/u);
 
   const core = new GuardCore({ budget: 1 });
-  core.check({
-    model: 'gpt-4o-mini',
-    tokens: Number.NaN,
-    estimatedCost: Number.POSITIVE_INFINITY,
-    timestamp: Number.NaN,
-    prompt: 'manual bad cost',
-  });
-  core.check({
-    model: 'gpt-4o-mini',
-    tokens: -10,
-    estimatedCost: -1,
-    timestamp: Date.now(),
-    prompt: 'manual negative cost',
-  });
-
-  assert.equal(core.getState().attemptedCost, 0);
-  assert.equal(core.getState().totalCost, 0);
-  assert.equal(core.getState().requestCount, 2);
+  assert.throws(
+    () => core.check({ model: 'gpt-4o-mini', pricingKnown: true, tokens: Number.NaN, estimatedCost: 0, timestamp: Date.now(), prompt: 'manual bad cost' }),
+    /tokens must be a finite non-negative number/u
+  );
+  assert.throws(
+    () => core.check({ model: 'gpt-4o-mini', pricingKnown: true, tokens: 1, estimatedCost: -1, timestamp: Date.now(), prompt: 'manual negative cost' }),
+    /estimatedCost must be a finite non-negative number/u
+  );
+  assert.equal(core.getState().requestCount, 0);
 });

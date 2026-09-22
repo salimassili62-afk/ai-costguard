@@ -9,6 +9,7 @@ const checks = [
   ['Smoke checks', ['npm', ['run', 'smoke']]],
   ['Production dependency audit', ['npm', ['audit', '--omit=dev']]],
   ['Package dry run', ['npm', ['pack', '--dry-run']]],
+  ['Packed package consumer', ['npm', ['run', 'package:test']]],
 ];
 
 let failed = false;

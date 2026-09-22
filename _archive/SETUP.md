@@ -72,7 +72,7 @@ await pro.checkAndCharge('tenant-abc', 0.0042);
 `checkAndCharge(projectId, estimatedCost)`:
 - Atomically increments spend in Redis using a Lua script with INCRBYFLOAT.
 - Sets a TTL on the key if one is not already set.
-- Falls back to process-local tracking automatically when Redis is unreachable.
+- Fails closed when Redis is unreachable unless `allowLocalFallback: true` is explicitly configured.
 - Throws `GuardError` with code `BUDGET_EXCEEDED` when spend exceeds budget.
 
 ---
@@ -137,7 +137,7 @@ redis-cli DEL costguard:spend:tenant-abc
 
 ## 9. Local fallback behaviour
 
-If Redis is unreachable at startup or during a request, `GuardPro` silently falls back to process-local spend tracking for that request. The fallback uses the same `windowSeconds` TTL. Budget enforcement continues — it is just not shared across processes until Redis reconnects.
+If Redis is unreachable at startup or during a request, `GuardPro` throws `SHARED_BUDGET_UNAVAILABLE` by default. Explicit `allowLocalFallback: true` is best-effort only and is not shared enforcement.
 
 This means:
 - No crash or exception on Redis failure.

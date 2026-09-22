@@ -11,9 +11,11 @@
  * Run after building the package:
  *   npx ts-node redis-shared-budget.ts
  *
- * Requires:
+ * No license key is required. Requires:
  *   npm install @salimassili/ai-costguard ioredis
  *   REDIS_URL=redis://localhost:6379
+ *
+ * See ../../docs/PRO.md for the canonical production guide.
  */
 
 import { GuardPro } from '@salimassili/ai-costguard/pro';

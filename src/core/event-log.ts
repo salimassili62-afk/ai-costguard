@@ -28,6 +28,7 @@ export interface GuardEventLogRecord {
   state: {
     requestCount: number;
     blockedCount: number;
+    reservedCost: number;
     totalCost: number;
     attemptedCost: number;
     blockedCost: number;
@@ -71,6 +72,7 @@ function toEventLogRecord(event: GuardEvent, promptMode: EventLogPromptMode): Gu
     state: {
       requestCount: event.state.requestCount,
       blockedCount: event.state.blockedCount,
+      reservedCost: roundMoney(event.state.reservedCost),
       totalCost: roundMoney(event.state.totalCost),
       attemptedCost: roundMoney(event.state.attemptedCost),
       blockedCost: roundMoney(event.state.blockedCost),

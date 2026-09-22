@@ -4,7 +4,7 @@ This is an archived draft. The current Pro kit is delivered via Lemon Squeezy pu
 
 This folder is archived Redis-starter material.
 
-The current paid deliverable is the **AI CostGuard Pro production kit**, sold as a **$49 one-time digital download**.
+The current paid deliverable is the **AI CostGuard Production Kit**, sold as a **$199 one-time digital download**.
 
 This folder uses the public `@salimassili/ai-costguard` npm package. Keep it only for historical reference. Do **not** advertise `pro-v0.1` as the current paid kit.
 
@@ -39,7 +39,7 @@ Node.js `>= 18` is required.
 
 - Not the current paid AI CostGuard Pro production kit.
 - Not a private npm package.
-- Not runtime license-key enforcement or DRM.
+- No runtime license enforcement or DRM; no key is required.
 - Not a SaaS backend or cloud dashboard.
 - Not a billing ledger or provider invoice reconciler.
 - Not a guarantee that estimates match provider invoices.

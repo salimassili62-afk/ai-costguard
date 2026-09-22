@@ -17,6 +17,7 @@
     "openai": "^4.28.0"
   },
   "devDependencies": {
+    "@salimassili/ai-costguard": "^2.2.3",
     "@types/express": "^4.17.21",
     "@types/node": "^20",
     "ts-node": "^10.9.2",

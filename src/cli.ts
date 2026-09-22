@@ -98,7 +98,7 @@ export function parseDashboardArgs(args: readonly string[]): CliDashboardOptions
     if (!arg.startsWith('--')) continue;
 
     const key = arg.slice(2);
-    if (key === 'once' || key === 'json') {
+    if (key === 'once' || key === 'json' || key === 'allow-remote') {
       flags.add(key);
       continue;
     }
@@ -120,6 +120,7 @@ export function parseDashboardArgs(args: readonly string[]): CliDashboardOptions
     recentLimit: readOptionalNumber(options, 'recent'),
     once: flags.has('once'),
     json: flags.has('json'),
+    allowRemote: flags.has('allow-remote'),
   };
 }
 
@@ -314,11 +315,13 @@ function helpText(): string {
     '  aifw pricing --check-stale --days 30',
     '  aifw dashboard --events .ai-costguard/events.jsonl --budget <usd>',
     '  ai-costguard dashboard --once --json',
+    '  ai-costguard dashboard --host 0.0.0.0 --allow-remote',
     '',
     'Notes:',
     '  --tokens is per-step output tokens. Use --input-tokens for input token estimates.',
     '  For custom models, pass --input-price-per-1k and --output-price-per-1k.',
     '  The dashboard is local-only and reads an opt-in JSONL event log.',
+    '  Non-loopback dashboard binding requires --allow-remote and has no authentication.',
     '  Exit code 0 means projected cost is within budget; 1 means over budget; 2 means usage/config error.',
     '',
   ].join('\n');

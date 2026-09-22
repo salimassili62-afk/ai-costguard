@@ -1,6 +1,6 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "Local-first runtime safety layer for AI agents that blocks runaway costs, loops, retries, and budget overruns before API calls execute.",
   "type": "module",
   "main": "./dist/index.js",
@@ -49,6 +49,7 @@
     "benchmark": "node benchmarks/run.mjs",
     "benchmark:tokens": "node benchmarks/token-accuracy.mjs",
     "preflight": "node scripts/preflight.js",
+    "package:test": "node scripts/package-smoke.js",
     "prepublishOnly": "npm run preflight"
   },
   "keywords": [

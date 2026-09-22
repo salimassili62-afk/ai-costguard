@@ -4,7 +4,13 @@ import type { ModelPricing } from '../pricing/index.js';
  * Stable machine-readable reasons for blocked requests.
  */
 export type GuardErrorCode =
+  | 'CONFIG_INVALID'
+  | 'CONTEXT_INVALID'
   | 'UNKNOWN_MODEL'
+  | 'OUTPUT_LIMIT_REQUIRED'
+  | 'STREAMING_UNSUPPORTED'
+  | 'SCOPE_LIMIT_EXCEEDED'
+  | 'SHARED_BUDGET_UNAVAILABLE'
   | 'BUDGET_EXCEEDED'
   | 'MAX_STEPS_EXCEEDED'
   | 'LOOP_DETECTED'
@@ -106,6 +112,8 @@ export interface GuardConfig {
   behaviorAnalysis?: boolean;
   /** Maximum prompt history retained for similarity checks. Defaults to 32. */
   maxHistory?: number;
+  /** Maximum number of process-local scopes retained. Defaults to 10,000. */
+  maxScopes?: number;
   /** Prompt/retry history TTL in milliseconds. Defaults to 5 minutes. */
   historyTtlMs?: number;
   /** Optional maximum number of allowed guarded calls in the current process. */
@@ -195,8 +203,8 @@ export interface GuardProConfig {
   discordWebhook?: string;
   /** Combined webhook configuration. */
   webhooks?: GuardWebhookConfig;
-  /** Optional Lemon Squeezy license key used to activate GuardPro. */
-  licenseKey?: string;
+  /** Explicitly permits unsafe process-local fallback when Redis is unavailable. Defaults to false. */
+  allowLocalFallback?: boolean;
   /** Optional Redis-compatible client. When omitted, GuardPro pools ioredis clients by URL. */
   redisClient?: GuardProRedisClient;
 }
@@ -208,7 +216,7 @@ export interface RequestContext {
   /** Model name supplied by the request, or "unknown" when missing. */
   model: string;
   /** True when pricing came from the registry, overrides, or configured fallback. */
-  pricingKnown?: boolean;
+  pricingKnown: boolean;
   /** Pricing entry used for estimation, when available. */
   pricing?: ModelPricing;
   /** Estimated total tokens, input plus reserved output. */
@@ -223,6 +231,8 @@ export interface RequestContext {
   estimatedCost: number;
   /** Actual USD cost reconciled from a provider usage response, when available. */
   actualCost?: number;
+  /** True when the request asks the provider to stream a response. */
+  streaming?: boolean;
   /** Unix timestamp in milliseconds when the context was created. */
   timestamp: number;
   /** Prompt text used for loop and retry detection. */
@@ -251,7 +261,9 @@ export interface PromptHistoryEntry {
 export interface GuardScopeState {
   /** Number of allowed requests. */
   requestCount: number;
-  /** Estimated allowed spend in USD. */
+  /** Estimated cost reserved for allowed requests; this is the budget enforcement value. */
+  reservedCost: number;
+  /** @deprecated Use reservedCost; retained for compatibility. */
   totalCost: number;
   /** Estimated cost of all guarded attempts, including blocked attempts. */
   attemptedCost: number;

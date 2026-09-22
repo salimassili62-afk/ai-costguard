@@ -1,8 +1,7 @@
 # AI CostGuard Pro — Lemon Squeezy Product Copy
 
 > Paste each section into the corresponding Lemon Squeezy store field.
-> Replace `[YOUR_CHECKOUT_URL]` with the real checkout link before publishing.
-> The Lemon Squeezy checkout URL placeholder used in this repo: `https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro`
+> The current Lemon Squeezy checkout URL is `https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65`.
 
 ---
 
@@ -17,7 +16,7 @@ AI CostGuard Pro
 ## Product Tagline (≤ 80 characters)
 
 ```
-Production setup materials for AI CostGuard — $49 one-time.
+Production setup materials for AI CostGuard — $199 one-time.
 ```
 
 ---
@@ -35,7 +34,7 @@ Production recipes, examples, and deployment notes for AI CostGuard.
 ```
 AI CostGuard is a local-first runtime safety layer for AI agents. The free npm package (MIT, open source) guards OpenAI, Anthropic, and Vercel AI SDK calls, blocks budget overruns and loops, and runs entirely in your process — no cloud, no SaaS, no proxy.
 
-AI CostGuard Pro is a $49 one-time production setup kit. The current production kit includes Redis/shared-budget setup material, Slack/webhook alert guidance, CI budget gates, deployment examples, and checklists that use the same public package API. Lemon Squeezy handles purchase, receipts, and downloads. No private npm package. No runtime license-key enforcement. No hosted backend.
+AI CostGuard Production Kit is a $199 one-time operational setup kit. It is built around the same public package API. No private npm package, commercial-license enforcement, DRM, or hosted backend.
 
 ---
 
@@ -55,13 +54,13 @@ Copy-paste recipes for Slack alerts, webhook alerts, Redis shared budgets, CI bu
 What Pro is not:
 - Not a SaaS platform or cloud dashboard
 - Not a private npm package
-- Not a license-key or DRM system
+- Not a commercial-license or DRM system
 - Not a hosted analytics product
 - Not a guarantee that provider billing matches estimates
 
 All Pro materials use only the public @salimassili/ai-costguard npm package and its published API surface.
 
-Price: $49 one-time digital download.
+Price: $199 one-time digital download.
 ```
 
 ---
@@ -75,7 +74,7 @@ Price: $49 one-time digital download.
 • Local-first production deployment notes
 • Production recipes, examples, and checklists
 • Uses the public @salimassili/ai-costguard API
-• No private npm package or runtime license-key enforcement
+• No private npm package or commercial-license enforcement
 ```
 
 ---
@@ -99,7 +98,7 @@ Subject: Your AI CostGuard Pro download is ready
 
 Hi,
 
-Thanks for purchasing AI CostGuard Pro ($49 one-time).
+Thanks for purchasing the AI CostGuard Production Kit ($199 one-time).
 
 Your download link for the AI CostGuard Pro production kit is attached to this email and also available in your Lemon Squeezy customer portal at any time.
 
@@ -140,14 +139,14 @@ Need help? Open an issue on GitHub or reply to your confirmation email.
 **Q: Do I need a separate npm package for Pro?**
 No. All Pro examples and guides use the public `@salimassili/ai-costguard` npm package. There is no private registry or separate install step.
 
-**Q: Is there a runtime license key?**
-No. Lemon Squeezy manages the purchase and receipts. The public npm package has no runtime license-key enforcement or DRM.
+**Q: Is a runtime license key required?**
+No. Lemon Squeezy manages the purchase and receipts; the public npm package has no commercial-license enforcement or DRM.
 
 **Q: What is the refund policy?**
 Check the Lemon Squeezy checkout terms for the current digital product refund policy.
 
 **Q: What are the current prices?**
-AI CostGuard Pro is currently $49 one-time.
+AI CostGuard Production Kit is currently $199 one-time.
 
 **Q: Does Pro include hosted monitoring or a cloud dashboard?**
 No. AI CostGuard is entirely local-first. Pro materials are setup guides and examples — no hosted backend is included or required.

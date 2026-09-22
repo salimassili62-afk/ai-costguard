@@ -27,10 +27,12 @@ export function guard<TClient extends object>(
   sharedState: GuardState = createGuardState()
 ): GuardedClient<TClient> {
   const core = new GuardCore(config, sharedState);
-  const proxies = new WeakMap<object, object>();
+  const proxies = new WeakMap<object, Map<string, object>>();
 
   const wrap = <TObject extends object>(target: TObject, path: string[] = []): TObject & GuardEventControls => {
-    const cached = proxies.get(target);
+    const cacheKey = JSON.stringify(path);
+    const targetProxies = proxies.get(target) ?? new Map<string, object>();
+    const cached = targetProxies.get(cacheKey);
     if (cached) return cached as TObject & GuardEventControls;
 
     const proxy = new Proxy(target, {
@@ -73,7 +75,8 @@ export function guard<TClient extends object>(
       },
     });
 
-    proxies.set(target, proxy);
+    targetProxies.set(cacheKey, proxy);
+    proxies.set(target, targetProxies);
     return proxy as TObject & GuardEventControls;
   };
 

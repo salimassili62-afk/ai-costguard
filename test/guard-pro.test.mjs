@@ -1,28 +1,5 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { test } from 'node:test';
-
-const TEST_LICENSE_KEY = process.env.COSTGUARD_PRO_KEY ?? 'test-key';
-process.env.COSTGUARD_PRO_KEY = TEST_LICENSE_KEY;
-
-const TEST_HOME = path.join(process.cwd(), '.test-home');
-const TEST_CACHE_DIR = path.join(TEST_HOME, '.ai-costguard');
-process.env.COSTGUARD_LICENSE_CACHE_DIR = TEST_CACHE_DIR;
-
-await fs.mkdir(TEST_CACHE_DIR, { recursive: true });
-await fs.writeFile(
-  path.join(TEST_CACHE_DIR, 'license-cache.json'),
-  JSON.stringify({
-    key: TEST_LICENSE_KEY,
-    valid: true,
-    activatedAt: new Date().toISOString(),
-    instanceId: 'test',
-    cachedAt: Date.now(),
-  }),
-  'utf8'
-);
 
 import { GuardError } from '../dist/index.js';
 import { GuardPro, getProGuard } from '../dist/pro.js';
@@ -91,7 +68,7 @@ test('GuardPro charges Redis atomically and blocks over budget', async () => {
   assert.equal(await guard.getSpend('project-a'), 0);
 });
 
-test('GuardPro falls back to local state when Redis fails', async () => {
+test('GuardPro fails closed when Redis shared enforcement fails', async () => {
   const redis = new FakeRedis();
   redis.failEval = true;
   const guard = new GuardPro({
@@ -101,11 +78,27 @@ test('GuardPro falls back to local state when Redis fails', async () => {
     windowSeconds: 60,
   });
 
+  await assert.rejects(
+    () => guard.checkAndCharge('project-b', 0.02),
+    (error) => error instanceof GuardError && error.code === 'SHARED_BUDGET_UNAVAILABLE'
+  );
+  await assert.rejects(() => guard.getSpend('project-b'), /Shared budget enforcement is unavailable/);
+});
+
+test('GuardPro local fallback requires explicit opt-in', async () => {
+  const redis = new FakeRedis();
+  redis.failEval = true;
+  const guard = new GuardPro({
+    redisUrl: 'redis://unit-explicit-fallback',
+    redisClient: redis,
+    budget: 0.03,
+    allowLocalFallback: true,
+    windowSeconds: 60,
+  });
+
   await guard.checkAndCharge('project-b', 0.02);
   assert.equal(await guard.getSpend('project-b'), 0.02);
-
   await assert.rejects(() => guard.checkAndCharge('project-b', 0.02), /would exceed budget/);
-  assert.equal(await guard.getSpend('project-b'), 0.02);
 });
 
 test('GuardPro rejects invalid charges before mutating spend', async () => {
@@ -123,7 +116,7 @@ test('GuardPro rejects invalid charges before mutating spend', async () => {
   assert.equal(await guard.getSpend('project-c'), 0);
 });
 
-test('GuardPro falls back when Redis returns an invalid total', async () => {
+test('GuardPro fails closed when Redis returns an invalid decision', async () => {
   const redis = new FakeRedis();
   redis.invalidEvalResult = true;
   const guard = new GuardPro({
@@ -133,30 +126,40 @@ test('GuardPro falls back when Redis returns an invalid total', async () => {
     windowSeconds: 60,
   });
 
-  await guard.checkAndCharge('project-d', 0.25);
-  assert.equal(await guard.getSpend('project-d'), 0.25);
+  await assert.rejects(
+    () => guard.checkAndCharge('project-d', 0.25),
+    (error) => error instanceof GuardError && error.code === 'SHARED_BUDGET_UNAVAILABLE'
+  );
 });
 
 test('GuardPro factory creates guards', () => {
-  assert.ok(getProGuard({ redisUrl: 'redis://unit', budget: 1, licenseKey: 'test-key' }) instanceof GuardPro);
+  assert.ok(getProGuard({ redisUrl: 'redis://unit', budget: 1 }) instanceof GuardPro);
 });
 
-test('GuardPro requires a license key', () => {
-  const originalKey = process.env.COSTGUARD_PRO_KEY;
-  delete process.env.COSTGUARD_PRO_KEY;
+test('GuardPro construction does not require runtime licensing', () => {
+  assert.doesNotThrow(() => new GuardPro({ redisUrl: 'redis://unit', budget: 1, windowSeconds: 60 }));
+});
 
-  try {
+test('GuardPro rejects invalid windowSeconds configuration', () => {
+  for (const windowSeconds of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     assert.throws(
-      () => new GuardPro({ redisUrl: 'redis://unit', budget: 1, windowSeconds: 60 }),
-      /A license key is required/,
+      () => new GuardPro({ redisUrl: 'redis://unit', budget: 1, windowSeconds }),
+      (error) => error instanceof GuardError && error.code === 'CONFIG_INVALID' && /windowSeconds/u.test(error.message)
     );
-  } finally {
-    if (originalKey !== undefined) {
-      process.env.COSTGUARD_PRO_KEY = originalKey;
-    } else {
-      delete process.env.COSTGUARD_PRO_KEY;
-    }
   }
+});
+
+test('GuardPro rejects invalid project identifiers with CONFIG_INVALID', async () => {
+  const guard = new GuardPro({ redisUrl: '', budget: 1, windowSeconds: 60 });
+
+  await assert.rejects(
+    () => guard.checkAndCharge(42, 0.01),
+    (error) => error instanceof GuardError && error.code === 'CONFIG_INVALID'
+  );
+  await assert.rejects(
+    () => guard.getSpend(''),
+    (error) => error instanceof GuardError && error.code === 'CONFIG_INVALID'
+  );
 });
 
 test('GuardPro blocked call triggers one raw webhook alert and still throws GuardError', async () => {

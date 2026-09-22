@@ -80,6 +80,50 @@ test('guard blocks before the wrapped method is called', async () => {
   assert.match(blocks[0], /Budget exceeded/);
 });
 
+test('provider failure keeps the conservative reservation and records no actual spend', async () => {
+  let calls = 0;
+  const guarded = guard(
+    {
+      chat: {
+        completions: {
+          create: async () => {
+            calls += 1;
+            throw new Error('provider failed');
+          },
+        },
+      },
+    },
+    { budget: 1 }
+  );
+
+  await assert.rejects(
+    () => guarded.chat.completions.create({ model: 'gpt-4o-mini', prompt: 'provider failure', max_tokens: 10 }),
+    /provider failed/
+  );
+  const state = guarded.getGuardState();
+  assert.equal(calls, 1);
+  assert.equal(state.requestCount, 1);
+  assert.ok(state.reservedCost > 0);
+  assert.equal(state.actualCost, 0);
+});
+
+test('guard rejects streaming before the provider method executes', async () => {
+  const client = createClient();
+  const guarded = guard(client, { budget: 1 });
+
+  assert.throws(
+    () =>
+      guarded.chat.completions.create({
+        model: 'gpt-4o-mini',
+        prompt: 'streaming request',
+        max_tokens: 10,
+        stream: true,
+      }),
+    (error) => error instanceof GuardError && error.code === 'STREAMING_UNSUPPORTED'
+  );
+  assert.equal(client.calls, 0);
+});
+
 test('guard ignores non-AI methods by default and supports explicit method filters', async () => {
   const client = createClient();
   const guarded = guard(client, { budget: 0 });
@@ -112,6 +156,36 @@ test('guard ignores non-AI methods by default and supports explicit method filte
 
   await custom.ai.run({ model: 'custom-model', prompt: 'custom', max_tokens: 10 });
   assert.equal(custom.getGuardState().requestCount, 1);
+});
+
+test('guard keeps shared nested objects isolated by method path', async () => {
+  let calls = 0;
+  const shared = {
+    create: async () => {
+      calls += 1;
+      return { ok: true };
+    },
+  };
+  const guarded = guard(
+    { first: { shared }, second: { shared } },
+    {
+      budget: 1,
+      guardedMethods: ['first.shared.create'],
+      pricingOverrides: [
+        {
+          model: 'shared-model',
+          inputPer1kTokens: 0.001,
+          outputPer1kTokens: 0.001,
+          lastUpdated: '2026-08-23',
+          source: 'unit-test',
+        },
+      ],
+    }
+  );
+
+  await guarded.second.shared.create({ model: 'shared-model', prompt: 'pass through', max_tokens: 1 });
+  assert.equal(calls, 1);
+  assert.equal(guarded.getGuardState().requestCount, 0);
 });
 
 test('guardFunction protects standalone AI functions and exposes guard controls', async () => {
@@ -225,6 +299,7 @@ test('middleware attaches localSafety and guard aliases backed by shared state',
 
   req.localSafety.check({
     model: 'gpt-4o-mini',
+    pricingKnown: true,
     tokens: 1,
     estimatedCost: 0.00001,
     timestamp: Date.now(),
@@ -237,6 +312,7 @@ test('middleware attaches localSafety and guard aliases backed by shared state',
     () =>
       req.guard.check({
         model: 'gpt-4',
+        pricingKnown: true,
         tokens: 1000,
         estimatedCost: 1,
         timestamp: Date.now(),

@@ -29,7 +29,7 @@ The root package:
 
 The optional Pro helper at `@salimassili/ai-costguard/pro` can connect to Redis when configured. Redis URL handling and network access are the host application's responsibility.
 
-The local dashboard command reads an application-selected JSONL file and binds to `127.0.0.1` by default. It is not a hosted analytics product.
+The local dashboard command reads an application-selected JSONL file and binds to `127.0.0.1` by default. Non-loopback binding requires explicit opt-in and has no authentication. It is not a hosted analytics product.
 
 ## Data Handling
 
@@ -37,11 +37,11 @@ Prompts used for behavior analysis are retained in process memory until evicted 
 
 Webhook payloads include the block reason, model, and estimated cost. They do not include the full prompt by default.
 
-JSONL event logs include model, method, scope key, estimated cost, event type, and block code. Prompt text is excluded by default. Prompt previews are written only when `eventLogPrompt: 'preview'` is configured.
+JSONL event logs include model, method, scope key, estimated/reserved cost, event type, and block code. Scope identifiers can contain tenant or user data and should be treated as sensitive. Prompt text is excluded by default. Prompt previews are written only when `eventLogPrompt: 'preview'` is configured.
 
 ## Known Limitations
 
 - Cost checks are estimates, not provider billing records.
 - Loop and retry detection are heuristics and can have false positives or false negatives.
-- AI CostGuard does not include license-key checks or local commercial-license enforcement.
+- AI CostGuard does not include commercial-license enforcement; Pro functionality is available through the public package API.
 - The free guard is process-local and does not protect other processes unless the application shares state externally.

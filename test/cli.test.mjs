@@ -113,6 +113,7 @@ test('CLI parses dashboard arguments', () => {
     host: undefined,
     port: undefined,
     recentLimit: undefined,
+    allowRemote: false,
     once: true,
     json: true,
   });

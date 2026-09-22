@@ -73,7 +73,7 @@ export function extractText(value: unknown): string {
  */
 export function estimateRequestTokens(params: unknown): {
   inputTokens: number;
-  outputTokens: number;
+  outputTokens?: number;
   tokens: number;
   prompt: string;
   approximate: boolean;
@@ -87,13 +87,12 @@ export function estimateRequestTokens(params: unknown): {
   const outputTokens = readPositiveNumber(record.max_tokens) ??
     readPositiveNumber(record.max_completion_tokens) ??
     readPositiveNumber(record.maxTokens) ??
-    readPositiveNumber(record.max_output_tokens) ??
-    1000;
+    readPositiveNumber(record.max_output_tokens);
 
   return {
     inputTokens,
     outputTokens,
-    tokens: inputTokens + outputTokens,
+    tokens: inputTokens + (outputTokens ?? 0),
     prompt,
     approximate: tokenEstimate.approximate,
   };

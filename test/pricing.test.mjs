@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { BUILTIN_PRICING_LAST_UPDATED, getPricing, getPricingMeta, listPricing, registerPricing } from '../dist/index.js';
+import {
+  BUILTIN_PRICING_LAST_UPDATED,
+  getPricing,
+  getPricingMeta,
+  listPricing,
+  registerPricing,
+  validatePricing,
+} from '../dist/index.js';
 
 test('pricing resolves exact, fuzzy, runtime, and override entries', () => {
-  assert.equal(BUILTIN_PRICING_LAST_UPDATED, '2026-06-07');
+  assert.equal(BUILTIN_PRICING_LAST_UPDATED, '2026-08-23');
   assert.equal(getPricing('gpt-4o-mini')?.model, 'gpt-4o-mini');
   assert.equal(getPricing('claude-3-haiku-20240307')?.model, 'claude-3-haiku');
   assert.equal(getPricing('internal-gpt-4-wrapper'), undefined);
@@ -70,4 +77,31 @@ test('pricing warns once for stale entries older than 30 days', () => {
 
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /older than 30 days/);
+});
+
+test('pricing rejects malformed safety inputs before registration or override use', () => {
+  const valid = {
+    model: 'valid-model',
+    inputPer1kTokens: 0,
+    outputPer1kTokens: 0.002,
+    lastUpdated: '2026-08-23',
+    source: 'unit-test',
+  };
+
+  assert.doesNotThrow(() => validatePricing(valid));
+
+  for (const invalid of [
+    { ...valid, inputPer1kTokens: Number.NaN },
+    { ...valid, outputPer1kTokens: Number.POSITIVE_INFINITY },
+    { ...valid, inputPer1kTokens: -1 },
+    { ...valid, model: '' },
+    { ...valid, model: 'has whitespace' },
+    { ...valid, lastUpdated: '2026-02-30' },
+    { ...valid, source: '' },
+    { ...valid, inputPer1kTokens: undefined },
+    { ...valid, outputPer1kTokens: undefined },
+  ]) {
+    assert.throws(() => registerPricing([invalid]), TypeError);
+    assert.throws(() => getPricing('valid-model', [invalid]), TypeError);
+  }
 });

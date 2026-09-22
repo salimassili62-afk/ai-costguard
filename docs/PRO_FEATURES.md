@@ -2,7 +2,7 @@
 
 AI CostGuard Free is the open-source npm package (`@salimassili/ai-costguard`), MIT licensed, free forever.
 
-**AI CostGuard Pro Self-Serve** is a $49 one-time production setup kit. The current production kit ships Redis/shared-budget setup material, Slack/webhook alert guidance, CI budget gates, deployment examples, and checklists that use the same public package API. Lemon Squeezy handles purchase, receipts, and downloads. The npm package does not perform runtime license-key enforcement. No private npm package. No SaaS backend.
+**AI CostGuard Production Kit** is one $199 one-time self-serve purchase. It is operational material built around the same public package API. There is no commercial-license enforcement, private npm package, DRM, or SaaS backend.
 
 ## What Free Includes
 
@@ -34,13 +34,13 @@ The current paid deliverable is the production kit. The older `pro-v0.1` folder 
 
 | Deliverable | Status | What it covers |
 |---|---|---|
-| **Slack/webhook and threshold alert recipes** | Included in production kit | Environment-variable setup for local alerts without SaaS telemetry |
-| **Redis/GuardPro setup guide** | Included in production kit | Step-by-step ioredis install, env-var config, connection pooling, and `GuardPro` initialization |
-| **Multi-process shared budget example** | Included in production kit | Annotated TypeScript: two worker processes sharing one Redis-backed budget via `GuardPro` |
-| **CI budget gate** | Included in production kit | Pipeline check for planned AI-agent spend |
-| **Vercel AI example** | Included in production kit | Production adapter pattern for function-style AI calls |
-| **Express production example** | Included in production kit | Middleware and error handling pattern for Node APIs |
-| **Production deployment guide** | Included in production kit | Deployment checklist, env vars, Redis, and alert handling |
+| **Slack/webhook and threshold alert recipes** | Kit scope | Environment-variable setup for local alerts without SaaS telemetry |
+| **Redis/GuardPro setup guide** | Kit scope | Step-by-step ioredis install, strict shared-budget behavior, and failure handling |
+| **Multi-process shared budget example** | Kit scope | Annotated TypeScript for Redis-backed budget enforcement |
+| **CI budget gate** | Kit scope | Pipeline check for planned AI-agent spend |
+| **Vercel AI example** | Kit scope | Adapter pattern for function-style AI calls, with tested limitations |
+| **Express production example** | Kit scope | Middleware and error handling pattern for Node APIs |
+| **Production deployment guide** | Kit scope | Deployment checklist, env vars, Redis, and alert handling |
 | **Multi-tenant isolation example** | Planned update | Express app with per-tenant `GuardPro` instances and per-request budget scoping |
 | **`registerTokenizer()` adapter recipes** | Planned update | tiktoken and Anthropic tokenizer wrappers with error handling and fallback |
 | **`GuardError` handling recipes** | Planned update | Per-code API response patterns for common block reasons |
@@ -51,7 +51,7 @@ The current paid deliverable is the production kit. The older `pro-v0.1` folder 
 
 - Not a SaaS platform or cloud dashboard
 - Not a private npm package
-- Not a license-key system
+- No runtime license key is required
 - Not a hosted analytics product
 - Not a guarantee that provider billing matches estimates
 
@@ -64,8 +64,8 @@ Use environment variables or your deployment secret manager for provider API key
 | Plan | Price | Includes |
 |---|---|---|
 | **Free** | $0 forever | Open-source npm package, MIT license |
-| **Pro Self-Serve** | $49 one-time | Downloadable production setup kit |
+| **Production Kit** | $199 one-time | Self-serve operational setup kit |
 
 No runtime license key is required; Lemon Squeezy handles the digital download.
 
-[Get AI CostGuard Pro](https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro)
+[Get AI CostGuard Pro](https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65)

@@ -54,6 +54,8 @@ export interface DashboardOptions {
   host?: string;
   port?: number;
   recentLimit?: number;
+  /** Required when binding anywhere other than loopback. */
+  allowRemote?: boolean;
 }
 
 /**
@@ -152,6 +154,11 @@ export function formatDashboardSummary(summary: DashboardSummary): string {
 export function startDashboardServer(options: DashboardOptions = {}): Promise<{ server: Server; url: string }> {
   const host = options.host ?? DEFAULT_DASHBOARD_HOST;
   const port = options.port ?? DEFAULT_DASHBOARD_PORT;
+  if (!isLoopbackHost(host) && options.allowRemote !== true) {
+    return Promise.reject(
+      new Error('Refusing non-loopback dashboard binding without allowRemote: true; the dashboard has no authentication.')
+    );
+  }
   const server = createServer((request, response) => {
     const summary = summarizeDashboard(options);
 
@@ -174,6 +181,10 @@ export function startDashboardServer(options: DashboardOptions = {}): Promise<{ 
       resolve({ server, url: `http://${host}:${actualPort}` });
     });
   });
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
 }
 
 function renderDashboardHtml(summary: DashboardSummary): string {

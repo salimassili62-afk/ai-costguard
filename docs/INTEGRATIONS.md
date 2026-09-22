@@ -17,6 +17,21 @@ node examples/integrations/slack-alerts.mjs
 node examples/integrations/ci-budget-check.mjs
 ```
 
+## Support Matrix
+
+| Surface | Status | Evidence and limitation |
+|---|---|---|
+| OpenAI-style `chat.completions.create` | Supported wrapper shape | Mocked tests; current SDK compatibility is not asserted by the core package |
+| OpenAI-style `completions.create` | Supported wrapper shape | Exact method-path matching; mocked only |
+| OpenAI-style `responses.create` | Supported wrapper shape | Payload extraction is generic; mocked only |
+| Anthropic-style `messages.create` | Supported wrapper shape | Generic message/usage extraction; mocked only |
+| Vercel AI, LangChain, Mastra adapters | Adapter pattern | Use `guardFunction()`; examples are mocked |
+| CrewAI | Launcher/CI boundary only | Python internals are not instrumented |
+| Streaming methods | Unsupported | Blocked with `STREAMING_UNSUPPORTED` because final usage is not reconciled |
+| Provider-internal retries | Unsupported | The guard cannot observe retries after the provider method starts |
+
+The examples below demonstrate request-shape adapters, not certification of every provider SDK version.
+
 ## OpenAI SDK
 
 Use `guard()` around the OpenAI client. AI CostGuard guards `chat.completions.create`, `responses.create`, and `completions.create` by default.

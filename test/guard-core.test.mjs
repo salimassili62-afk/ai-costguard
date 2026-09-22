@@ -51,24 +51,34 @@ test('token estimator calibrates code, structured payloads, Claude-family, and u
 test('registered tokenizers override prompt token estimation by model string pattern', () => {
   registerTokenizer('unit-tokenizer-string', () => 7);
 
-  const core = new GuardCore({
-    budget: 1,
-    pricingOverrides: [
-      {
-        model: 'unit-tokenizer-string-model',
-        inputPer1kTokens: 1,
-        outputPer1kTokens: 0,
-        lastUpdated: '2026-06-07',
-        source: 'unit-test',
-      },
-    ],
-  });
-  const context = core.extractContext([{ model: 'unit-tokenizer-string-model', prompt: 'hello world', max_tokens: 3 }]);
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (message) => warnings.push(String(message));
 
-  assert.equal(context.inputTokens, 7);
-  assert.equal(context.outputTokens, 3);
-  assert.equal(context.tokens, 10);
-  assert.equal(context.approximateTokens, false);
+  try {
+    const core = new GuardCore({
+      budget: 1,
+      pricingOverrides: [
+        {
+          model: 'unit-tokenizer-string-model',
+          inputPer1kTokens: 1,
+          outputPer1kTokens: 0,
+          lastUpdated: '2026-08-23',
+          source: 'unit-test',
+        },
+      ],
+    });
+    const context = core.extractContext([{ model: 'unit-tokenizer-string-model', prompt: 'hello world', max_tokens: 3 }]);
+
+    assert.equal(context.inputTokens, 7);
+    assert.equal(context.outputTokens, 3);
+    assert.equal(context.tokens, 10);
+    assert.equal(context.approximateTokens, false);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warnings.length, 0);
 });
 
 test('registered tokenizers support RegExp model patterns', () => {
@@ -149,6 +159,7 @@ test('GuardCore emits cost and allow events for an allowed request', () => {
 
   const result = core.check({
     model: 'gpt-4o-mini',
+    pricingKnown: true,
     tokens: 10,
     inputTokens: 5,
     outputTokens: 5,
@@ -161,6 +172,7 @@ test('GuardCore emits cost and allow events for an allowed request', () => {
   assert.deepEqual(events, ['cost', 'allow']);
   assert.equal(core.getState().requestCount, 1);
   assert.equal(core.getState().attemptedCost, 0.00001);
+  assert.equal(core.getState().reservedCost, core.getState().totalCost);
 });
 
 test('GuardCore blocks similar prompt loops after repeated scoped matches', () => {
@@ -168,6 +180,7 @@ test('GuardCore blocks similar prompt loops after repeated scoped matches', () =
 
   const first = {
     model: 'gpt-4o-mini',
+    pricingKnown: true,
     tokens: 10,
     estimatedCost: 0.00001,
     timestamp: Date.now(),
@@ -239,6 +252,42 @@ test('GuardCore validates structured loopDetection config', () => {
   );
 });
 
+test('GuardCore rejects invalid maxHistory configuration', () => {
+  for (const maxHistory of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => new GuardCore({ maxHistory }),
+      (error) => error instanceof GuardError && error.code === 'CONFIG_INVALID' && /maxHistory/u.test(error.message)
+    );
+  }
+});
+
+test('GuardCore rejects invalid contexts instead of converting safety values to zero', () => {
+  const core = new GuardCore({ budget: 1 });
+
+  assert.throws(
+    () => core.check({ model: 'gpt-4o-mini', tokens: Number.NaN, estimatedCost: 0, timestamp: Date.now(), prompt: 'bad' }),
+    (error) => error instanceof GuardError && error.code === 'CONTEXT_INVALID'
+  );
+  assert.throws(
+    () => core.check({ model: 'gpt-4o-mini', tokens: 1, estimatedCost: 0, timestamp: Date.now(), prompt: 'bad' }),
+    (error) => error instanceof GuardError && error.code === 'CONTEXT_INVALID'
+  );
+});
+
+test('GuardCore blocks streaming before provider execution and reconciles usage once', () => {
+  const core = new GuardCore({ budget: 1 });
+  const streaming = core.extractContext([{ model: 'gpt-4o-mini', prompt: 'stream', max_tokens: 10, stream: true }]);
+
+  assert.equal(streaming.streaming, true);
+  assert.throws(() => core.check(streaming), (error) => error instanceof GuardError && error.code === 'STREAMING_UNSUPPORTED');
+
+  const context = core.extractContext([{ model: 'gpt-4o-mini', prompt: 'once', max_tokens: 10 }]);
+  core.check(context);
+  core.recordActualUsage(context, { usage: { prompt_tokens: 12, completion_tokens: 4 } });
+  core.recordActualUsage(context, { usage: { prompt_tokens: 1200, completion_tokens: 400 } });
+  assert.equal(core.getState().actualCost, context.actualCost);
+});
+
 test('GuardCore blocks retry storms and max step overflow', () => {
   const retryCore = new GuardCore({ budget: 1, retryThreshold: 2 });
   const makeRetry = (prompt) => ({
@@ -295,6 +344,34 @@ test('GuardCore blocks unknown models unless fallback pricing is configured', ()
   assert.equal(fallbackCore.check(fallback).decision, 'allow');
 });
 
+test('GuardCore rejects cost overflow instead of converting it to zero', () => {
+  const core = new GuardCore({
+    budget: 1,
+    pricingOverrides: [
+      {
+        model: 'overflow-model',
+        inputPer1kTokens: Number.MAX_VALUE,
+        outputPer1kTokens: Number.MAX_VALUE,
+        lastUpdated: '2026-08-23',
+        source: 'unit-test',
+      },
+    ],
+  });
+
+  assert.throws(
+    () => core.extractContext([{ model: 'overflow-model', prompt: 'overflow', max_tokens: Number.MAX_VALUE }]),
+    (error) => error instanceof GuardError && error.code === 'CONTEXT_INVALID'
+  );
+});
+
+test('GuardCore rejects requests without an explicit output limit', () => {
+  const core = new GuardCore({ budget: 1 });
+  assert.throws(
+    () => core.extractContext([{ model: 'gpt-4o-mini', prompt: 'missing output limit' }]),
+    (error) => error instanceof GuardError && error.code === 'OUTPUT_LIMIT_REQUIRED'
+  );
+});
+
 test('GuardCore isolates behavior history by scope and prunes expired history', () => {
   const core = new GuardCore({ budget: 1, historyTtlMs: 1, loopSimilarityThreshold: 0.85 });
   const base = {
@@ -317,6 +394,26 @@ test('GuardCore isolates behavior history by scope and prunes expired history', 
   assert.equal(scopeA.recentPrompts.length, 1);
 });
 
+test('GuardCore uses collision-resistant scope keys and bounds scope creation', () => {
+  const core = new GuardCore({ budget: 1, maxScopes: 2 });
+  const first = core.extractContext([
+    { model: 'gpt-4o-mini', prompt: 'one', max_tokens: 1, projectId: 'a|user:b', userId: 'c' },
+  ]);
+  const second = core.extractContext([
+    { model: 'gpt-4o-mini', prompt: 'one', max_tokens: 1, projectId: 'a', userId: 'b|c' },
+  ]);
+
+  assert.notEqual(first.scopeKey, second.scopeKey);
+  core.check(first);
+  core.check(second);
+
+  const third = core.extractContext([{ model: 'gpt-4o-mini', prompt: 'three', max_tokens: 1, projectId: 'third' }]);
+  assert.throws(
+    () => core.check(third),
+    (error) => error instanceof GuardError && error.code === 'SCOPE_LIMIT_EXCEEDED'
+  );
+});
+
 test('GuardCore records actual usage when provider responses include usage fields', () => {
   const core = new GuardCore({ budget: 1 });
   const context = core.extractContext([
@@ -332,4 +429,21 @@ test('GuardCore records actual usage when provider responses include usage field
 
   assert.ok(context.actualCost > 0);
   assert.equal(core.getState().actualCost, context.actualCost);
+});
+
+test('GuardCore keeps reservation and actual usage distinct across usage variance', () => {
+  const core = new GuardCore({ budget: 10 });
+  const context = core.extractContext([{ model: 'gpt-4o-mini', prompt: 'variance', max_tokens: 10 }]);
+  core.check(context);
+  const reserved = core.getState().reservedCost;
+
+  core.recordActualUsage(context, { usage: { prompt_tokens: 0, completion_tokens: 0 } });
+  assert.equal(context.actualCost, 0);
+  assert.equal(core.getState().reservedCost, reserved);
+
+  const larger = core.extractContext([{ model: 'gpt-4o-mini', prompt: 'larger', max_tokens: 1 }]);
+  core.check(larger);
+  core.recordActualUsage(larger, { usage: { prompt_tokens: 10_000, completion_tokens: 10_000 } });
+  assert.ok(larger.actualCost > larger.estimatedCost);
+  assert.equal(core.getState().reservedCost, core.getState().totalCost);
 });

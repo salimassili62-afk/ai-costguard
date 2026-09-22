@@ -6,8 +6,8 @@ const STALE_PRICING_DAYS = 30;
  * Provider pricing changes; use pricingOverrides/registerPricing for current
  * production pricing when provider pages differ from these built-ins.
  */
-export const BUILTIN_PRICING_LAST_UPDATED = '2026-06-07';
-// pricing last updated: 2026-06-07
+export const BUILTIN_PRICING_LAST_UPDATED = '2026-08-23';
+// pricing last updated: 2026-08-23
 
 /**
  * Pricing entry expressed in USD per 1,000 tokens.
@@ -39,131 +39,155 @@ export interface PricingMeta {
   stale: boolean;
 }
 
+/**
+ * Validates one pricing entry before it can influence a safety decision.
+ */
+export function validatePricing(entry: ModelPricing, field = 'pricing'): void {
+  if (!entry || typeof entry !== 'object') {
+    throw new TypeError(`${field} must be an object`);
+  }
+
+  if (typeof entry.model !== 'string' || !entry.model.trim() || /\s/u.test(entry.model)) {
+    throw new TypeError(`${field}.model must be a non-empty model identifier without whitespace`);
+  }
+
+  validatePrice(entry.inputPer1kTokens, `${field}.inputPer1kTokens`);
+  validatePrice(entry.outputPer1kTokens, `${field}.outputPer1kTokens`);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(entry.lastUpdated) || !isValidDate(entry.lastUpdated)) {
+    throw new TypeError(`${field}.lastUpdated must be a valid YYYY-MM-DD date`);
+  }
+
+  if (typeof entry.source !== 'string' || !entry.source.trim()) {
+    throw new TypeError(`${field}.source must be a non-empty string`);
+  }
+}
+
 const BUILTIN_PRICING: readonly ModelPricing[] = [
   {
     model: 'gpt-5.5',
     inputPer1kTokens: 0.005,
     outputPer1kTokens: 0.03,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://developers.openai.com/api/docs/pricing',
   },
   {
     model: 'gpt-5.4',
     inputPer1kTokens: 0.0025,
     outputPer1kTokens: 0.015,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://developers.openai.com/api/docs/pricing',
   },
   {
     model: 'gpt-5.4-mini',
     inputPer1kTokens: 0.00075,
     outputPer1kTokens: 0.0045,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://developers.openai.com/api/docs/pricing',
   },
   {
     model: 'gpt-5.4-nano',
     inputPer1kTokens: 0.0002,
     outputPer1kTokens: 0.00125,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://developers.openai.com/api/docs/pricing',
   },
   {
     model: 'gpt-4',
     inputPer1kTokens: 0.03,
     outputPer1kTokens: 0.06,
-    lastUpdated: '2026-05-21',
+    lastUpdated: '2026-08-23',
     source: 'https://openai.com/pricing',
   },
   {
     model: 'gpt-4o',
     inputPer1kTokens: 0.005,
     outputPer1kTokens: 0.015,
-    lastUpdated: '2026-05-21',
+    lastUpdated: '2026-08-23',
     source: 'https://openai.com/pricing',
   },
   {
     model: 'gpt-4o-mini',
     inputPer1kTokens: 0.00015,
     outputPer1kTokens: 0.0006,
-    lastUpdated: '2026-05-21',
+    lastUpdated: '2026-08-23',
     source: 'https://openai.com/pricing',
   },
   {
     model: 'gpt-3.5-turbo',
     inputPer1kTokens: 0.0005,
     outputPer1kTokens: 0.0015,
-    lastUpdated: '2026-05-21',
+    lastUpdated: '2026-08-23',
     source: 'https://openai.com/pricing',
   },
   {
     model: 'claude-fable-5',
     inputPer1kTokens: 0.01,
     outputPer1kTokens: 0.05,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://platform.claude.com/docs/en/about-claude/models/overview',
   },
   {
     model: 'claude-opus-4-8',
     inputPer1kTokens: 0.005,
     outputPer1kTokens: 0.025,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://platform.claude.com/docs/en/about-claude/models/overview',
   },
   {
     model: 'claude-opus-4.8',
     inputPer1kTokens: 0.005,
     outputPer1kTokens: 0.025,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://platform.claude.com/docs/en/about-claude/pricing',
   },
   {
     model: 'claude-sonnet-5',
     inputPer1kTokens: 0.002,
     outputPer1kTokens: 0.01,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://platform.claude.com/docs/en/about-claude/models/overview',
   },
   {
     model: 'claude-sonnet-4.6',
     inputPer1kTokens: 0.003,
     outputPer1kTokens: 0.015,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://platform.claude.com/docs/en/about-claude/pricing',
   },
   {
     model: 'claude-haiku-4-5',
     inputPer1kTokens: 0.001,
     outputPer1kTokens: 0.005,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://platform.claude.com/docs/en/about-claude/models/overview',
   },
   {
     model: 'claude-haiku-4.5',
     inputPer1kTokens: 0.001,
     outputPer1kTokens: 0.005,
-    lastUpdated: '2026-07-03',
+    lastUpdated: '2026-08-23',
     source: 'https://platform.claude.com/docs/en/about-claude/pricing',
   },
   {
     model: 'claude-3-opus',
     inputPer1kTokens: 0.015,
     outputPer1kTokens: 0.075,
-    lastUpdated: '2026-05-21',
+    lastUpdated: '2026-08-23',
     source: 'https://www.anthropic.com/pricing',
   },
   {
     model: 'claude-3-sonnet',
     inputPer1kTokens: 0.003,
     outputPer1kTokens: 0.015,
-    lastUpdated: '2026-05-21',
+    lastUpdated: '2026-08-23',
     source: 'https://www.anthropic.com/pricing',
   },
   {
     model: 'claude-3-haiku',
     inputPer1kTokens: 0.00025,
     outputPer1kTokens: 0.00125,
-    lastUpdated: '2026-05-21',
+    lastUpdated: '2026-08-23',
     source: 'https://www.anthropic.com/pricing',
   },
 ];
@@ -175,6 +199,10 @@ const staleWarnings = new Set<string>();
  * Returns pricing for a model from overrides, runtime entries, or built-in entries.
  */
 export function getPricing(model: string, overrides: readonly ModelPricing[] = []): ModelPricing | undefined {
+  if (typeof model !== 'string' || !model.trim()) return undefined;
+  for (const [index, entry] of overrides.entries()) {
+    validatePricing(entry, `pricingOverrides[${index}]`);
+  }
   const normalizedModel = normalizeModel(model);
 
   warnIfAnyStale(overrides);
@@ -203,6 +231,14 @@ export function getPricing(model: string, overrides: readonly ModelPricing[] = [
  * Registers or replaces runtime pricing entries by model name.
  */
 export function registerPricing(entries: readonly ModelPricing[]): void {
+  if (!Array.isArray(entries)) {
+    throw new TypeError('pricing entries must be an array');
+  }
+
+  for (const [index, entry] of entries.entries()) {
+    validatePricing(entry, `pricing[${index}]`);
+  }
+
   warnIfAnyStale(entries);
 
   for (const entry of entries) {
@@ -278,6 +314,17 @@ function warnIfStale(entry: ModelPricing): void {
         `Last checked ${entry.lastUpdated}; verify ${entry.source}.`
     );
   }
+}
+
+function validatePrice(value: unknown, field: string): void {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(`${field} must be a finite non-negative number`);
+  }
+}
+
+function isValidDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function getPricingAgeDays(entry: ModelPricing): number {

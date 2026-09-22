@@ -1,8 +1,8 @@
 # AI CostGuard
 [![npm version](https://img.shields.io/npm/v/@salimassili/ai-costguard)](https://www.npmjs.com/package/@salimassili/ai-costguard)
-[![AI CostGuard Pro](https://img.shields.io/badge/Pro-$99%20one--time-orange)](https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b)
+[![AI CostGuard Production Kit](https://img.shields.io/badge/Production%20Kit-$199%20one--time-orange)](https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65)
 
-AI CostGuard is a local-first runtime safety layer for AI agents that prevents runaway costs, loops, retries, and budget explosions before API calls execute. It wraps OpenAI-compatible clients and function-style SDK calls, estimates request cost locally, blocks budget overruns, detects repeated prompts, emits structured events, and exposes CLI checks plus a local dashboard.
+AI CostGuard is a pre-call spend firewall for Node.js AI agents. It evaluates selected model calls in process and blocks the next call when the configured estimated-cost or safety policy would be exceeded.
 
 It is local-first. It does not include a SaaS control plane, cloud dashboard, proxy gateway, telemetry service, billing reconciliation service, or hard security boundary.
 
@@ -27,6 +27,17 @@ It is local-first. It does not include a SaaS control plane, cloud dashboard, pr
 ```bash
 npm install @salimassili/ai-costguard
 ```
+
+## 90-Second Demo
+
+The deterministic demo needs no API key, network, provider SDK, or money:
+
+```bash
+npm run build
+node examples/integrations/quick-demo.mjs
+```
+
+It runs two mock provider calls, blocks the third before the mock provider executes, and prints the structured block event. The important proof is `Provider calls: 2` and `Blocked provider calls: 1`.
 
 ## Quick Start
 
@@ -97,7 +108,7 @@ const client = guard(customClient, {
       model: 'internal-model',
       inputPer1kTokens: 0.001,
       outputPer1kTokens: 0.002,
-      lastUpdated: '2026-06-07',
+      lastUpdated: '2026-08-23',
       source: 'internal pricing sheet',
     },
   ],
@@ -139,10 +150,14 @@ try {
 Current runtime block codes:
 
 - `UNKNOWN_MODEL`
+- `OUTPUT_LIMIT_REQUIRED`
 - `BUDGET_EXCEEDED`
 - `MAX_STEPS_EXCEEDED`
 - `LOOP_DETECTED`
 - `RETRY_STORM_DETECTED`
+- `STREAMING_UNSUPPORTED`
+- `SCOPE_LIMIT_EXCEEDED`
+- `CONTEXT_INVALID`
 
 ## Configuration
 
@@ -190,6 +205,7 @@ guard(client, {
 
 `scope` isolates budgets and behavior history. If no scope is supplied, the guard uses one process-local default scope.
 Top-level `projectId` and `runId` are convenience aliases for alert payloads and default scope values.
+Scope identifiers are sensitive application data and are bounded to 256 characters. Process-local scope state is bounded by `maxScopes` (default: 10,000); exceeding the limit blocks new scopes rather than silently evicting budget state.
 
 ## Loop Detection Tuning
 
@@ -222,20 +238,21 @@ Legacy `loopSimilarityThreshold` and `loopMinRepeats` config fields are still ac
 
 ## Accounting Semantics
 
-AI CostGuard is a pre-call estimator, not a billing ledger.
+AI CostGuard is a conservative pre-call estimator, not a billing ledger. An allowed estimate is reserved in the process-local budget and remains reserved if the provider call later fails. This preserves the safety boundary at the cost of possible over-reservation.
 
-- `attemptedCost`: estimated cost of every guarded attempt, including blocked attempts.
-- `totalCost`: estimated cost of allowed calls.
-- `blockedCost`: estimated cost stopped before provider execution.
+- `attemptedCost`: estimated cost of every evaluated attempt, including blocked attempts.
+- `totalCost`: estimated reserved cost for allowed calls; it is not provider spend.
+- `blockedCost`: estimated cost stopped before provider execution; it is never actual spend.
 - `actualCost`: provider-reported usage cost when the response includes recognizable `usage` fields.
 
 Budget decisions use estimated allowed cost. Actual usage is recorded for observability but does not rewrite earlier decisions.
+Provider failures keep their reservation. Actual usage is reconciled at most once per request context. Streaming requests are rejected because this package does not safely reconcile provider-final usage for streams.
 
 ## Pricing
 
-Known model pricing comes from built-in registry entries, runtime registrations, or per-guard overrides. Unknown models are blocked by default.
+Known model pricing comes from built-in registry entries, runtime registrations, or per-guard overrides. Unknown models are blocked by default. Invalid pricing is rejected rather than converted to zero cost.
 
-Pricing last updated: `2026-06-07`. Provider pricing changes; AI CostGuard does not fetch real-time pricing. Override pricing manually when provider pages or your contract pricing differ from the built-ins.
+Pricing last updated: `2026-08-23`. Provider pricing changes; AI CostGuard does not fetch real-time pricing. Override pricing manually when provider pages or your contract pricing differ from the built-ins.
 
 ```ts
 import { getPricingMeta, registerPricing } from '@salimassili/ai-costguard';
@@ -245,7 +262,7 @@ registerPricing([
     model: 'my-company-model',
     inputPer1kTokens: 0.001,
     outputPer1kTokens: 0.002,
-    lastUpdated: '2026-06-07',
+    lastUpdated: '2026-08-23',
     source: 'internal',
   },
 ]);
@@ -271,7 +288,7 @@ guard(client, {
     model: 'fallback',
     inputPer1kTokens: 0.001,
     outputPer1kTokens: 0.002,
-    lastUpdated: '2026-06-07',
+    lastUpdated: '2026-08-23',
     source: 'application fallback',
   },
 });
@@ -406,7 +423,6 @@ Runnable mocked examples are included for:
 - Mastra-style agent runner protection
 - CrewAI launch/budget gate
 - Local webhook and Slack alert mocks
-- CI budget checks
 
 See `docs/INTEGRATIONS.md` and `examples/integrations`.
 
@@ -423,6 +439,7 @@ app.post('/chat', async (req, res, next) => {
   try {
     req.localSafety.check({
       model: 'gpt-4o-mini',
+      pricingKnown: true,
       tokens: 500,
       inputTokens: 100,
       outputTokens: 400,
@@ -442,53 +459,7 @@ app.post('/chat', async (req, res, next) => {
 });
 ```
 
-> **AI CostGuard Pro requires a license key.**
-> [Purchase here ($99 one-time)](https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b)
-> Set `COSTGUARD_PRO_KEY=your-key` in your environment, or pass
-> `licenseKey` directly to the constructor.
-
-## Optional Redis / Pro Helper
-
-Redis-backed shared spend tracking is isolated behind a subpath import:
-
-```ts
-import { GuardPro } from '@salimassili/ai-costguard/pro';
-
-// License key required — purchase at aicostguard.lemonsqueezy.com
-const pro = new GuardPro({
-  licenseKey: process.env.COSTGUARD_PRO_KEY,
-  budget: { maxUsd: 1.0, windowSeconds: 60 },
-  redisUrl: process.env.REDIS_URL,
-});
-```
-
-`checkAndCharge()` only persists allowed spend. If a charge would exceed the budget, `GuardPro` throws `GuardError` and leaves the stored Redis/local spend at the previous allowed total.
-
-`ioredis` is an optional dependency and is not loaded by the root import.
-
-AI CostGuard now performs runtime license-key validation for GuardPro.
-
-## AI CostGuard Pro
-
-AI CostGuard Free is the open-source npm package above: free forever, MIT licensed.
-
-**AI CostGuard Pro Self-Serve** is a `$99` one-time production setup kit for teams taking Node.js AI agents into production. Lemon Squeezy handles purchase, receipts, and downloads. The npm package does not perform runtime license-key enforcement.
-
-Current production-kit materials include:
-
-- Slack/webhook and threshold alert recipes
-- Redis/GuardPro setup guide
-- Multi-process shared-budget example
-- CI budget gate
-- Vercel AI and Express production examples
-- Production deployment guide
-- Environment-variable based Redis/webhook configuration guidance
-
-Future kit updates may include multi-tenant examples, tokenizer adapter recipes, `GuardError` handling patterns, pricing override guides, and framework config starters as those files are completed.
-
-No runtime license-key enforcement. No private npm package. No SaaS backend. You get a downloadable folder of setup materials and examples that use the public package API. Use environment variables or your deployment secret manager for provider keys, `REDIS_URL`, and webhook URLs; never hardcode secrets.
-
-[Get AI CostGuard Pro →](https://aicostguard.lemonsqueezy.com/checkout/buy/e4e0f19c-76c7-42d6-9411-bbed5268a16b)
+See the [current Production Kit definition](https://github.com/salimassili62-afk/ai-costguard/blob/main/docs/PRO.md) for production Redis, multi-tenant, and CI gate guidance.
 
 ## CLI
 

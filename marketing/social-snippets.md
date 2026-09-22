@@ -1,7 +1,7 @@
 # AI CostGuard — Launch Social Snippets
 
 > Copy-paste ready. Replace `[YOUR_LS_URL]` with your Lemon Squeezy checkout link before posting.
-> Lemon Squeezy URL placeholder: `https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro`
+> Lemon Squeezy checkout: `https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65`
 
 ---
 
@@ -84,7 +84,7 @@ Real guardrails, no fake claims.
 **Tweet 6 (Pro CTA)**
 
 ```
-Just launched AI CostGuard Pro — $49 one-time.
+Just launched the AI CostGuard Production Kit — $199 one-time.
 
 What Pro includes:
 • Redis/GuardPro setup guide
@@ -92,9 +92,9 @@ What Pro includes:
 • Environment-variable based Redis/webhook config
 • Production recipes, examples, and checklists
 
-No private npm. Lemon Squeezy manages the purchase and download; the package has no runtime license-key enforcement. Uses the same public package.
+No private npm or commercial-license enforcement. Lemon Squeezy manages the purchase and download; Pro uses the same public package.
 
-[Get Pro →] https://salimassili.lemonsqueezy.com/buy/ai-costguard-pro
+[Get Pro →] https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65
 ```
 
 ---
@@ -130,7 +130,7 @@ The README has explicit "What it does" and "What it does not" sections because I
 npm: https://www.npmjs.com/package/@salimassili/ai-costguard
 GitHub: https://github.com/salimassili62-afk/ai-costguard
 
-I also launched a $49 one-time Pro production kit. It includes Redis/GuardPro setup material, production recipes, Express and Vercel examples, CI gates, and deployment notes. No private npm; Lemon Squeezy manages the purchase and it uses the same public package.
+I also launched a $199 one-time Production Kit. It provides operational setup material around Redis/GuardPro, production recipes, CI gates, and deployment notes. No private npm, DRM, or runtime license enforcement.
 
 Happy to answer questions about the design, especially the loop detection (character trigram cosine similarity) and the token estimation approach (dependency-free approximation with registerTokenizer() for exact counting).
 ```
@@ -161,7 +161,7 @@ One line to add the wrapper:
 Works with OpenAI, Anthropic, Vercel AI SDK, LangChain adapters, and any function-style SDK call.
 
 Free on npm (MIT): @salimassili/ai-costguard
-Pro ($49 one-time): production recipes, Redis setup guide, shared-budget example, CI gates, and deployment notes.
+Production Kit ($199 one-time): production recipes, Redis setup guide, shared-budget example, CI gates, and deployment notes.
 
 Link in comments.
 
