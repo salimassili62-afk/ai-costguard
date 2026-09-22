@@ -1,34 +1,20 @@
 import { spawnSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const coverageThresholdFlags = [
-  '--test-coverage-include',
-  '--test-coverage-lines',
-  '--test-coverage-functions',
-  '--test-coverage-branches',
+const c8Bin = join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', 'c8', 'bin', 'c8.js');
+const args = [
+  c8Bin,
+  '--check-coverage',
+  '--lines=80',
+  '--functions=80',
+  '--branches=70',
+  '--include=dist/**/*.js',
+  '--reporter=text',
+  process.execPath,
+  '--test',
 ];
-const supportsCoverageThresholdFlags = coverageThresholdFlags.every((flag) =>
-  process.allowedNodeEnvironmentFlags.has(flag)
-);
-
-const args = ['--test'];
-
-if (supportsCoverageThresholdFlags) {
-  args.push(
-    '--experimental-test-coverage',
-    '--test-coverage-include=dist/**/*.js',
-    '--test-coverage-lines=80',
-    '--test-coverage-functions=80',
-    '--test-coverage-branches=70'
-  );
-} else {
-  args.push('--experimental-test-coverage');
-  console.warn(
-    `[ai-costguard] Node ${process.versions.node} does not support test coverage threshold flags; ` +
-      'running tests with Node 18-compatible coverage output.'
-  );
-}
 
 const testFiles = findTestFiles('test');
 if (testFiles.length === 0) {
