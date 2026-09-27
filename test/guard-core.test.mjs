@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { GuardCore, GuardError } from '../dist/core/GuardCore.js';
-import { cosineSimilarity } from '../dist/core/similarity.js';
-import { estimateTokensForModel, estimateTokensFromText, estimateRequestTokens } from '../dist/core/tokenizer.js';
-import { registerTokenizer } from '../dist/index.js';
+import { GuardCore, GuardError } from '../dist/esm/core/GuardCore.js';
+import { cosineSimilarity } from '../dist/esm/core/similarity.js';
+import { estimateTokensForModel, estimateTokensFromText, estimateRequestTokens } from '../dist/esm/core/tokenizer.js';
+import { registerTokenizer } from '../dist/esm/index.js';
+import { daysAgo } from './helpers/dates.mjs';
 
 test('token estimator calibrates normal English without extreme overestimation', () => {
   const estimate = estimateTokensForModel('gpt-4o-mini', 'Summarize this support ticket in two bullets.');
@@ -33,7 +34,7 @@ test('token estimator calibrates code, structured payloads, Claude-family, and u
     '{"model":"gpt-4o-mini","max_tokens":400,"tools":[{"name":"search","strict":true}]}'
   );
   const claude = estimateTokensForModel(
-    'claude-sonnet-4.6',
+    'claude-sonnet-4-5',
     'Claude should inspect the document, call the classifier once, and stop if confidence is below 0.7.'
   );
   const gptForSameText = estimateTokensForModel(
@@ -63,7 +64,7 @@ test('registered tokenizers override prompt token estimation by model string pat
           model: 'unit-tokenizer-string-model',
           inputPer1kTokens: 1,
           outputPer1kTokens: 0,
-          lastUpdated: '2026-08-23',
+          lastUpdated: daysAgo(1),
           source: 'unit-test',
         },
       ],
@@ -91,7 +92,7 @@ test('registered tokenizers support RegExp model patterns', () => {
         model: 'unit-tokenizer-regex-model',
         inputPer1kTokens: 1,
         outputPer1kTokens: 0,
-        lastUpdated: '2026-06-07',
+        lastUpdated: daysAgo(1),
         source: 'unit-test',
       },
     ],
@@ -121,7 +122,7 @@ test('tokenizer errors fall back to approximate counting with one warning per mo
           model: 'unit-tokenizer-throws-model',
           inputPer1kTokens: 1,
           outputPer1kTokens: 0,
-          lastUpdated: '2026-06-07',
+          lastUpdated: daysAgo(1),
           source: 'unit-test',
         },
       ],
@@ -134,11 +135,17 @@ test('tokenizer errors fall back to approximate counting with one warning per mo
     assert.equal(first.approximateTokens, true);
     assert.equal(second.approximateTokens, true);
     assert.ok(first.inputTokens > 0);
+
+    // A different scope for the same model must warn again: the dedupe key is model + scope.
+    const otherScope = core.extractContext([
+      { model: 'unit-tokenizer-throws-model', prompt: 'fallback prompt', max_tokens: 1, sessionId: 'other' },
+    ]);
+    assert.equal(otherScope.approximateTokens, true);
   } finally {
     console.warn = originalWarn;
   }
 
-  assert.equal(warnings.length, 2);
+  assert.equal(warnings.length, 2, 'exactly one warning per model+scope, and no other warning noise');
   assert.match(
     warnings[0],
     /^\[ai-costguard\] Using approximate token counting for model: unit-tokenizer-throws-model/
@@ -334,7 +341,7 @@ test('GuardCore blocks unknown models unless fallback pricing is configured', ()
       model: 'private-model',
       inputPer1kTokens: 0.001,
       outputPer1kTokens: 0.002,
-      lastUpdated: '2026-06-07',
+      lastUpdated: daysAgo(1),
       source: 'unit-test',
     },
   });
@@ -352,7 +359,7 @@ test('GuardCore rejects cost overflow instead of converting it to zero', () => {
         model: 'overflow-model',
         inputPer1kTokens: Number.MAX_VALUE,
         outputPer1kTokens: Number.MAX_VALUE,
-        lastUpdated: '2026-08-23',
+        lastUpdated: daysAgo(1),
         source: 'unit-test',
       },
     ],

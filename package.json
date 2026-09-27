@@ -1,35 +1,42 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "2.2.4",
-  "description": "Local-first runtime safety layer for AI agents that blocks runaway costs, loops, retries, and budget overruns before API calls execute.",
+  "version": "2.3.0",
+  "description": "In-process pre-call spend enforcement and agent execution policy for Node.js AI agents. Blocks over-budget calls, prompt loops, retry storms, and max-step overruns before the provider request executes.",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
   "sideEffects": false,
   "bin": {
-    "aifw": "dist/cli.js",
-    "ai-costguard": "dist/cli.js"
+    "aifw": "dist/esm/cli.js",
+    "ai-costguard": "dist/esm/cli.js"
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/esm/index.js"
     },
     "./pro": {
-      "types": "./dist/pro.d.ts",
-      "import": "./dist/pro.js",
-      "default": "./dist/pro.js"
+      "types": "./dist/types/pro.d.ts",
+      "import": "./dist/esm/pro.js",
+      "require": "./dist/cjs/pro.js",
+      "default": "./dist/esm/pro.js"
     },
     "./pricing": {
-      "types": "./dist/pricing/index.d.ts",
-      "import": "./dist/pricing/index.js",
-      "default": "./dist/pricing/index.js"
-    }
+      "types": "./dist/types/pricing/index.d.ts",
+      "import": "./dist/esm/pricing/index.js",
+      "require": "./dist/cjs/pricing/index.js",
+      "default": "./dist/esm/pricing/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
+    "docs/ACCOUNTING.md",
+    "docs/COVERAGE.md",
+    "docs/SHARED-BUDGET.md",
     "docs/DASHBOARD.md",
     "docs/INTEGRATIONS.md",
     "docs/BENCHMARKS.md",
@@ -42,55 +49,57 @@
   ],
   "scripts": {
     "clean": "rimraf dist",
-    "build": "npm run clean && tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.js",
+    "typecheck": "tsc --project tsconfig.json",
     "test": "npm run build && node scripts/run-tests.js",
     "smoke": "node test/smoke-examples.mjs",
     "benchmark": "node benchmarks/run.mjs",
     "benchmark:tokens": "node benchmarks/token-accuracy.mjs",
     "preflight": "node scripts/preflight.js",
     "package:test": "node scripts/package-smoke.js",
-    "prepublishOnly": "npm run preflight"
+    "prepublishOnly": "node scripts/preflight.js"
   },
   "keywords": [
     "ai",
     "openai",
+    "anthropic",
     "llm",
     "cost-control",
+    "budget-guard",
+    "spend-guard",
     "agent",
+    "agent-safety",
     "runtime-safety",
     "ai-agents",
-    "budget-guard"
+    "loop-detection",
+    "retry-storm"
   ],
   "author": "Salim Assili",
   "license": "MIT",
   "homepage": "https://github.com/salimassili62-afk/ai-costguard#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/salimassili62-afk/ai-costguard.git"
+    "url": "git+https://github.com/salimassili62-afk/ai-costguard.git",
+    "directory": "/"
   },
   "bugs": {
     "url": "https://github.com/salimassili62-afk/ai-costguard/issues"
   },
-  "jest": {
-    "coverageThreshold": {
-      "global": {
-        "statements": 89,
-        "branches": 81,
-        "functions": 89
-      }
-    }
-  },
   "engines": {
     "node": ">=18"
+  },
+  "peerDependencies": {
+    "ioredis": "^5.4.1"
+  },
+  "peerDependenciesMeta": {
+    "ioredis": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
     "c8": "10.1.3",
     "rimraf": "^5.0.10",
     "typescript": "^5.3.3"
-  },
-  "optionalDependencies": {
-    "ioredis": "^5.10.1"
   }
 }

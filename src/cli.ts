@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { getPricing, listPricing } from './pricing/index.js';
+import { getPricing, getPricingMeta, listPricing } from './pricing/index.js';
 import {
   formatDashboardSummary,
   getDefaultEventLogPath,
@@ -231,6 +231,7 @@ export function runCli(args: readonly string[] = process.argv.slice(2), io: CliI
 
     const options = parseCheckArgs(args.slice(1));
     const pricing = getPricing(options.model);
+    const pricingMeta = getPricingMeta(options.model);
     const hasCustomPricing = options.inputPricePer1k !== undefined || options.outputPricePer1k !== undefined;
 
     if (hasCustomPricing && (options.inputPricePer1k === undefined || options.outputPricePer1k === undefined)) {
@@ -248,7 +249,10 @@ export function runCli(args: readonly string[] = process.argv.slice(2), io: CliI
     const inputPer1kTokens = options.inputPricePer1k ?? pricing?.inputPer1kTokens ?? 0;
     const outputPer1kTokens = options.outputPricePer1k ?? pricing?.outputPer1kTokens ?? 0;
     const perStepCost = (options.inputTokens / 1000) * inputPer1kTokens + (options.tokens / 1000) * outputPer1kTokens;
-    const projectedCost = perStepCost * options.maxSteps;
+    // Rounded before it is compared, so the exit code and the reported figure can never disagree.
+    // Raw IEEE-754 addition puts twenty $0.025 steps at 0.5000000000000001 and would fail a $0.50
+    // budget that the printed number says it met.
+    const projectedCost = roundMoney(perStepCost * options.maxSteps);
     const ok = projectedCost <= options.budget;
 
     io.stdout(
@@ -259,8 +263,14 @@ export function runCli(args: readonly string[] = process.argv.slice(2), io: CliI
           inputTokensPerStep: options.inputTokens,
           outputTokensPerStep: options.tokens,
           maxSteps: options.maxSteps,
-          estimatedCostUsd: roundMoney(projectedCost),
+          estimatedCostUsd: projectedCost,
           budgetUsd: options.budget,
+          // Which entry the cost was actually derived from. `family-prefix` means the registry has
+          // no entry for `--model` and used the nearest family instead, so this gate is running on an
+          // assumed price.
+          pricingModel: hasCustomPricing ? null : (pricing?.model ?? null),
+          pricingMatch: hasCustomPricing ? 'custom' : (pricingMeta?.match ?? null),
+          pricingOrigin: hasCustomPricing ? 'custom' : (pricingMeta?.origin ?? null),
         },
         null,
         2
@@ -284,9 +294,15 @@ if (isCliEntry()) {
 }
 
 function readRequiredNumber(options: Map<string, string>, key: string): number {
-  const value = Number(options.get(key));
+  const raw = options.get(key);
+  // A missing flag and a malformed flag are different mistakes. Number(undefined) is NaN, so
+  // folding both cases together told someone who forgot --budget that their budget was negative.
+  if (raw === undefined) {
+    throw new Error(`--${key} is required`);
+  }
+  const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`--${key} must be a non-negative number`);
+    throw new Error(`--${key} must be a non-negative number, received "${raw}"`);
   }
   return value;
 }

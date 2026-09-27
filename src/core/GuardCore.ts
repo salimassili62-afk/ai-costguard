@@ -1,4 +1,4 @@
-import { getPricing, validatePricing } from '../pricing/index.js';
+import { getPricing, listBuiltInPricing, preparePricingOverrides, validatePricing } from '../pricing/index.js';
 import type { ModelPricing } from '../pricing/index.js';
 import { sendCostGuardAlert } from './alerts.js';
 import { appendGuardEventLog } from './event-log.js';
@@ -10,6 +10,7 @@ import type {
   CostGuardAlertsConfig,
   GuardConfig,
   GuardErrorCode,
+  GuardEvent,
   GuardEventHandler,
   GuardEventName,
   GuardScope,
@@ -27,15 +28,24 @@ const DEFAULT_LOOP_MIN_REPEATS = 2;
 const DEFAULT_LOOP_WINDOW_SIZE = 5;
 const DEFAULT_RETRY_THRESHOLD = 2;
 const DEFAULT_MAX_SCOPES = 10_000;
-const DEFAULT_GUARDED_METHODS = [
+
+/**
+ * SDK method paths guarded when `guardedMethods` is not configured.
+ *
+ * Every other method on a wrapped client is passed through untouched and is therefore
+ * NOT cost-checked. See docs/COVERAGE.md for the full protected/not-protected table.
+ */
+export const DEFAULT_GUARDED_METHODS: readonly string[] = [
   'chat.completions.create',
   'completions.create',
   'responses.create',
   'messages.create',
 ] as const;
 
-const RETRY_TERMS = /\b(retry|retries|retrying|rerun|repeat|again)\b/u;
-const FAILURE_TERMS = /\b(error|fail|failed|failure|timeout|timed out|rate limit|429|unavailable|exception)\b/u;
+const RETRY_TERMS = /\b(retry|retries|retrying|rerun|reran|repeat|repeated|again|reattempt|redo)\b/iu;
+const FAILURE_TERMS =
+  /\b(error|errors|errored|fail|failed|failing|failure|failures|timeout|timed out|rate limit|rate-limit|throttled|429|500|502|503|504|unavailable|exception|denied|overloaded)\b/iu;
+const ATTEMPT_TERMS = /\b(attempt|attempts|try|tries|pass|passes)\s*(?:#|no\.?|number)?\s*\d+\b/iu;
 
 interface NormalizedBudget {
   maxUsd: number;
@@ -55,6 +65,7 @@ interface NormalizedGuardConfig {
   loopWindowSize: number;
   retryThreshold: number;
   guardedMethods: string[];
+  defaultOutputTokens?: number;
   unknownModelPolicy: 'block' | 'fallback';
   unknownModelPricing?: GuardConfig['unknownModelPricing'];
   pricingOverrides?: GuardConfig['pricingOverrides'];
@@ -95,6 +106,16 @@ export interface GuardErrorMetadata {
   scopeKey: string;
   /** Highest prompt similarity involved in a loop/retry decision. */
   similarity?: number;
+  /** Model the block was evaluated for, or "unknown". */
+  model: string;
+  /** Estimated USD cost of the blocked request. Never provider spend. */
+  estimatedCostUsd: number;
+  /** Configured per-scope budget in USD. */
+  budgetLimitUsd: number;
+  /** Estimated USD already reserved in this scope before the decision. */
+  reservedCostUsd: number;
+  /** Estimated USD left in this scope. Never negative. */
+  remainingUsd: number;
 }
 
 /**
@@ -126,6 +147,11 @@ export class GuardError extends Error {
       reason: message,
       context,
       scopeKey: context.scopeKey ?? 'default',
+      model: context.model ?? 'unknown',
+      estimatedCostUsd: safeMoney(context.estimatedCost),
+      budgetLimitUsd: 0,
+      reservedCostUsd: 0,
+      remainingUsd: 0,
       ...metadata,
     };
   }
@@ -188,6 +214,12 @@ export class GuardCore {
     if (config.unknownModelPolicy !== undefined && config.unknownModelPolicy !== 'block' && config.unknownModelPolicy !== 'fallback') {
       throw configError('GuardCore unknownModelPolicy must be "block" or "fallback"');
     }
+    if (
+      config.defaultOutputTokens !== undefined &&
+      (!Number.isFinite(config.defaultOutputTokens) || config.defaultOutputTokens <= 0)
+    ) {
+      throw configError('GuardCore defaultOutputTokens must be a finite number greater than 0');
+    }
     if (config.eventLogPrompt !== undefined && config.eventLogPrompt !== 'none' && config.eventLogPrompt !== 'preview') {
       throw configError('GuardCore eventLogPrompt must be "none" or "preview"');
     }
@@ -197,6 +229,9 @@ export class GuardCore {
       config.unknownModelPolicy === 'fallback' && config.unknownModelPricing ? [config.unknownModelPricing] : [],
       'unknownModelPricing'
     );
+    // Stale and 0/0 pricing entries in overrides are reported once per process here rather than on
+    // every guarded request.
+    preparePricingOverrides(config.pricingOverrides);
 
     this.config = {
       budget: budget.maxUsd,
@@ -211,6 +246,7 @@ export class GuardCore {
       loopWindowSize: Math.trunc(loopWindowSize),
       retryThreshold: Math.max(1, Math.trunc(config.retryThreshold ?? DEFAULT_RETRY_THRESHOLD)),
       guardedMethods: config.guardedMethods ?? [...DEFAULT_GUARDED_METHODS],
+      defaultOutputTokens: config.defaultOutputTokens,
       unknownModelPolicy: config.unknownModelPolicy ?? 'block',
       unknownModelPricing: config.unknownModelPricing,
       pricingOverrides: config.pricingOverrides,
@@ -228,7 +264,7 @@ export class GuardCore {
     };
     this.state = sharedState;
     hydrateScopeState(this.state);
-    this.state.scopes ??= {};
+    this.state.scopes ??= createScopeMap();
   }
 
   /**
@@ -265,13 +301,24 @@ export class GuardCore {
   extractContext(args: readonly unknown[], method?: string): RequestContext {
     const params = args[0];
     const record = isRecord(params) ? params : {};
-    const model = typeof record.model === 'string' && record.model.trim() ? record.model.trim() : 'unknown';
+    const requestedModel = readString(record.model);
+    if (!requestedModel) {
+      throw new GuardError(
+        'A model name is required before the request can be costed. Pass `model` in the request object.',
+        undefined,
+        'UNKNOWN_MODEL'
+      );
+    }
+    const model = requestedModel;
     const scope = this.extractScope(record);
     const scopeKey = createScopeKey(scope);
     const tokenEstimate = estimateRequestTokens(record);
-    if (tokenEstimate.outputTokens === undefined) {
+    const outputTokens = tokenEstimate.outputTokens ?? this.config.defaultOutputTokens;
+    if (outputTokens === undefined) {
       throw new GuardError(
-        'A finite output token limit is required for safe pre-call estimation.',
+        'A finite output token limit is required for safe pre-call estimation. ' +
+          'Pass one of max_tokens / max_completion_tokens / max_output_tokens in the request, ' +
+          'or set guard({ defaultOutputTokens }) to reserve a fixed amount instead.',
         undefined,
         'OUTPUT_LIMIT_REQUIRED'
       );
@@ -281,11 +328,33 @@ export class GuardCore {
     }
     const registryPricing = getPricing(model, this.config.pricingOverrides);
     const pricing = registryPricing ?? (this.config.unknownModelPolicy === 'fallback' ? this.config.unknownModelPricing : undefined);
-    const inputPer1kTokens = pricing?.inputPer1kTokens ?? 0;
-    const outputPer1kTokens = pricing?.outputPer1kTokens ?? 0;
+    if (!pricing) {
+      return {
+        model,
+        pricingKnown: false,
+        pricing: undefined,
+        tokens: tokenEstimate.inputTokens + outputTokens,
+        inputTokens: tokenEstimate.inputTokens,
+        approximateTokens: tokenEstimate.approximate,
+        outputTokens,
+        outputTokensSource: tokenEstimate.outputTokens === undefined ? 'default' : 'request',
+        mediaTokens: tokenEstimate.mediaTokens,
+        schemaTokens: tokenEstimate.schemaTokens,
+        hasMediaInput: tokenEstimate.hasMediaInput,
+        hasSchemaInput: tokenEstimate.hasSchemaInput,
+        estimatedCost: 0,
+        timestamp: Date.now(),
+        prompt: tokenEstimate.prompt.slice(0, 4000),
+        method,
+        streaming: record.stream === true,
+        scope,
+        scopeKey,
+      };
+    }
+    const inputPer1kTokens = pricing.inputPer1kTokens;
+    const outputPer1kTokens = pricing.outputPer1kTokens;
     const estimatedCost =
-      (tokenEstimate.inputTokens / 1000) * inputPer1kTokens +
-      (tokenEstimate.outputTokens / 1000) * outputPer1kTokens;
+      (tokenEstimate.inputTokens / 1000) * inputPer1kTokens + (outputTokens / 1000) * outputPer1kTokens;
     if (!Number.isFinite(estimatedCost) || estimatedCost < 0) {
       throw new GuardError(
         `Estimated cost for model "${model}" is not finite.`,
@@ -295,12 +364,17 @@ export class GuardCore {
     }
     return {
       model,
-      pricingKnown: pricing !== undefined,
+      pricingKnown: true,
       pricing,
-      tokens: tokenEstimate.tokens,
+      tokens: tokenEstimate.inputTokens + outputTokens,
       inputTokens: tokenEstimate.inputTokens,
       approximateTokens: tokenEstimate.approximate,
-      outputTokens: tokenEstimate.outputTokens,
+      outputTokens,
+      outputTokensSource: tokenEstimate.outputTokens === undefined ? 'default' : 'request',
+      mediaTokens: tokenEstimate.mediaTokens,
+      schemaTokens: tokenEstimate.schemaTokens,
+      hasMediaInput: tokenEstimate.hasMediaInput,
+      hasSchemaInput: tokenEstimate.hasSchemaInput,
       estimatedCost,
       timestamp: Date.now(),
       prompt: tokenEstimate.prompt.slice(0, 4000),
@@ -312,17 +386,35 @@ export class GuardCore {
   }
 
   /**
-   * Checks a request context, records allowed calls, emits events, and throws GuardError on block.
+   * Evaluates one request and, when allowed, commits its estimated cost as a reservation.
+   *
+   * Concurrency contract
+   * --------------------
+   * This method is fully synchronous and never awaits. Everything between reading
+   * `scope.reservedCost` for the budget test and writing it back for the reservation runs in one
+   * uninterrupted turn of the event loop, with no user callback, `await`, or timer in between.
+   * Two concurrent in-process callers therefore cannot both pass the budget test for the same
+   * scope and then race to commit: the second caller observes the first caller's reservation.
+   *
+   * Scope of the guarantee:
+   *
+   * - Guaranteed: any number of concurrent `Promise.all` callers inside one Node.js process that
+   *   share one guard, or guards that share one `GuardState`.
+   * - Not guaranteed: separate processes, `worker_threads`, `cluster` workers, serverless
+   *   isolates, or any other address space. Those need a shared store; see
+   *   docs/SHARED-BUDGET.md.
+   *
+   * @throws GuardError for every policy block. A throw means the provider method was never called.
    */
   check(context: RequestContext): GuardCheckResult {
     normalizeRequestContext(context);
     const scope = this.getScopeState(context);
     this.pruneScope(scope, Date.now());
     this.recordAttempt(scope, context);
-    this.emit('cost', context);
 
+    // --- critical section: no user code, no await, no I/O below this line until commit ---
     if (context.pricingKnown === false) {
-      return this.block('UNKNOWN_MODEL', `No pricing found for model "${context.model}".`, context);
+      return this.block('UNKNOWN_MODEL', unknownModelReason(context.model), context);
     }
 
     if (context.streaming) {
@@ -354,7 +446,11 @@ export class GuardCore {
       if (retryDecision) return this.block('RETRY_STORM_DETECTED', retryDecision.reason, context, retryDecision.similarity);
     }
 
-    this.recordAllowed(scope, context);
+    // Commit the reservation in the same synchronous turn as the budget test above.
+    this.commitReservation(scope, context);
+    // --- end of critical section ---
+
+    this.emit('cost', context);
     this.emit('allow', context);
     this.alertThresholdIfNeeded(scope, context);
 
@@ -362,34 +458,99 @@ export class GuardCore {
   }
 
   /**
-   * Reconciles actual provider usage from OpenAI/Anthropic-like response objects when available.
+   * Writes the reservation for an allowed request.
+   *
+   * Kept as its own method so the budget test and this write are provably adjacent: nothing
+   * between them can yield, so a concurrent caller cannot observe a stale `reservedCost`.
+   */
+  private commitReservation(scope: GuardScopeState, context: RequestContext): void {
+    const now = Date.now();
+
+    this.state.requestCount += 1;
+    this.state.reservedCost = addMoney(this.state.reservedCost, context.estimatedCost);
+    this.state.totalCost = this.state.reservedCost;
+    this.state.lastRequestTime = now;
+
+    scope.requestCount += 1;
+    scope.reservedCost = addMoney(scope.reservedCost, context.estimatedCost);
+    scope.totalCost = scope.reservedCost;
+    scope.lastRequestTime = now;
+
+    this.pushHistory(scope, 'recentPrompts', context.prompt);
+    if (hasRetrySignal(context.prompt)) {
+      this.pushHistory(scope, 'recentRetries', context.prompt);
+    }
+  }
+
+  /**
+   * Reconciles provider-reported usage from OpenAI/Anthropic-like response objects.
+   *
+   * Reconciliation is observability only. It never refunds a reservation, never rewrites an
+   * earlier budget decision, and is applied at most once per request context.
+   *
+   * Documented fallbacks:
+   *
+   * - Both usage sides present: `actualCost` is computed from provider numbers, `usageStatus`
+   *   is `reported`.
+   * - One usage side present: the missing side falls back to the pre-call estimate, and
+   *   `usageStatus` is `partial`. Treat the result as an upper bound.
+   * - No recognizable usage fields: `actualCost` stays unset, `usageStatus` is `unavailable`, and
+   *   the reservation stands as the only cost signal for this request.
    */
   recordActualUsage(context: RequestContext, response: unknown): void {
     if (this.reconciledContexts.has(context)) return;
-    if (!context.pricing) return;
+    this.reconciledContexts.add(context);
+
+    if (!context.pricing) {
+      context.usageStatus = 'skipped';
+      this.emit('usage', context);
+      return;
+    }
 
     const usage = extractUsage(response);
-    if (!usage) return;
+    if (!usage) {
+      context.usageStatus = 'unavailable';
+      this.emit('usage', context);
+      return;
+    }
 
     const inputTokens = usage.inputTokens ?? context.inputTokens ?? 0;
     const outputTokens = usage.outputTokens ?? context.outputTokens ?? 0;
-    const actualCost =
+    const computed =
       (inputTokens / 1000) * context.pricing.inputPer1kTokens +
       (outputTokens / 1000) * context.pricing.outputPer1kTokens;
 
-    if (!Number.isFinite(actualCost) || actualCost < 0) return;
+    if (!Number.isFinite(computed) || computed < 0) {
+      context.usageStatus = 'unavailable';
+      this.emit('usage', context);
+      return;
+    }
 
-    this.reconciledContexts.add(context);
+    // Rounded to the same micro-cent scale as every stored money field, so the per-request figure a
+    // caller reads back is exactly the figure that was added to the running totals.
+    const actualCost = roundMoney(computed);
     context.actualCost = actualCost;
-    this.state.actualCost += actualCost;
-    const scope = this.getScopeState(context);
-    scope.actualCost += actualCost;
+    context.usageReported = true;
+    context.usagePartial = usage.inputTokens === undefined || usage.outputTokens === undefined;
+    context.usageStatus = context.usagePartial ? 'partial' : 'reported';
+
+    this.state.actualCost = addMoney(this.state.actualCost, actualCost);
+    const scope = this.findScopeState(context);
+    if (scope) scope.actualCost = addMoney(scope.actualCost, actualCost);
     this.emit('usage', context);
   }
 
   private checkBudget(scope: GuardScopeState, context: RequestContext): string | undefined {
-    if (scope.reservedCost + context.estimatedCost <= this.config.budget) return undefined;
-    return `Budget exceeded: estimated $${(scope.reservedCost + context.estimatedCost).toFixed(6)} / $${this.config.budget.toFixed(6)}`;
+    // Compared on the same micro-cent scale that reservedCost is stored on, so an estimate that
+    // lands exactly on the remaining budget is allowed and a float artefact never blocks a call.
+    const projected = addMoney(scope.reservedCost, context.estimatedCost);
+    if (projected <= this.config.budget) return undefined;
+    return (
+      `Budget exceeded for scope ${context.scopeKey ?? 'default'}: ` +
+      `reserved $${scope.reservedCost.toFixed(6)} + estimated $${context.estimatedCost.toFixed(6)} ` +
+      `= $${projected.toFixed(6)} exceeds budget $${this.config.budget.toFixed(6)} ` +
+      `(remaining $${Math.max(0, roundMoney(this.config.budget - scope.reservedCost)).toFixed(6)})`
+    );
   }
 
   private checkMaxSteps(scope: GuardScopeState): string | undefined {
@@ -429,25 +590,8 @@ export class GuardCore {
   }
 
   private recordAttempt(scope: GuardScopeState, context: RequestContext): void {
-    this.state.attemptedCost += context.estimatedCost;
-    scope.attemptedCost += context.estimatedCost;
-  }
-
-  private recordAllowed(scope: GuardScopeState, context: RequestContext): void {
-    this.state.requestCount += 1;
-    this.state.reservedCost += context.estimatedCost;
-    this.state.totalCost += context.estimatedCost;
-    this.state.lastRequestTime = Date.now();
-
-    scope.requestCount += 1;
-    scope.reservedCost += context.estimatedCost;
-    scope.totalCost += context.estimatedCost;
-    scope.lastRequestTime = this.state.lastRequestTime;
-
-    this.pushHistory(scope, 'recentPrompts', context.prompt);
-    if (hasRetrySignal(context.prompt)) {
-      this.pushHistory(scope, 'recentRetries', context.prompt);
-    }
+    this.state.attemptedCost = addMoney(this.state.attemptedCost, context.estimatedCost);
+    scope.attemptedCost = addMoney(scope.attemptedCost, context.estimatedCost);
   }
 
   private pushHistory(scope: GuardScopeState, key: 'recentPrompts' | 'recentRetries', prompt: string): void {
@@ -470,55 +614,114 @@ export class GuardCore {
     similarity?: number
   ): GuardCheckResult {
     const scope = this.getScopeState(context);
-    this.state.blockedCount += 1;
-    this.state.blockedCost += context.estimatedCost;
-    scope.blockedCount += 1;
-    scope.blockedCost += context.estimatedCost;
+    this.recordBlock(scope, context);
+    this.emit('cost', context);
     this.emit('block', context, reason, code);
 
     void notifyBlockWebhooks(this.config.webhooks, { reason, context });
     void sendCostGuardAlert(this.config.alerts, this.createAlertPayload('blocked', codeToAlertReason(code), 'critical', context, {
       estimatedSavedUsd: context.estimatedCost,
-      budgetUsedUsd: scope.totalCost,
+      budgetUsedUsd: scope.reservedCost,
     }));
 
-    throw new GuardError(reason, context, code, { similarity, scopeKey: context.scopeKey ?? 'default' });
+    throw new GuardError(reason, context, code, {
+      similarity,
+      scopeKey: context.scopeKey ?? 'default',
+      model: context.model,
+      estimatedCostUsd: safeMoney(context.estimatedCost),
+      budgetLimitUsd: this.config.budget,
+      reservedCostUsd: safeMoney(scope.reservedCost),
+      remainingUsd: Math.max(0, roundMoney(this.config.budget - scope.reservedCost)),
+    });
+  }
+
+  private recordBlock(scope: GuardScopeState | undefined, context: RequestContext): void {
+    this.state.blockedCount += 1;
+    this.state.blockedCost = addMoney(this.state.blockedCost, context.estimatedCost);
+    if (!scope) return;
+
+    scope.blockedCount += 1;
+    scope.blockedCost = addMoney(scope.blockedCost, context.estimatedCost);
   }
 
   private emit(type: GuardEventName, context: RequestContext, reason?: string, code?: GuardErrorCode): void {
-    const event = {
+    const event: GuardEvent = {
       type,
       context,
       code,
       reason,
-      state: { ...this.state, scopes: { ...this.state.scopes } },
+      state: this.hasEventConsumers() ? snapshotState(this.state) : EMPTY_STATE_SNAPSHOT,
     };
 
-    appendGuardEventLog(this.config.eventLogPath, event, this.config.eventLogPrompt);
+    if (this.config.eventLogPath) {
+      appendGuardEventLog(this.config.eventLogPath, event, this.config.eventLogPrompt);
+    }
     this.emitter.emit(event);
+  }
+
+  private hasEventConsumers(): boolean {
+    return this.config.eventLogPath !== undefined || this.emitter.hasHandlers();
   }
 
   private getScopeState(context: RequestContext): GuardScopeState {
     const scopeKey = context.scopeKey ?? createScopeKey(context.scope);
-    this.state.scopes ??= {};
-    const existing = this.state.scopes[scopeKey];
+    this.state.scopes ??= createScopeMap();
+    const existing = readOwnScope(this.state.scopes, scopeKey);
     if (existing) {
       hydrateScopeState(existing);
       return existing;
     }
 
     if (Object.keys(this.state.scopes).length >= this.config.maxScopes) {
-      throw new GuardError(
-        `Maximum process-local scope count exceeded: ${this.config.maxScopes}`,
+      // No scope exists for this request, so only the process-wide aggregate is updated.
+      // Failing closed here is deliberate: silently evicting a scope would hand a caller a fresh
+      // budget for a project that already spent its allowance.
+      this.state.attemptedCost = addMoney(this.state.attemptedCost, context.estimatedCost);
+      this.recordBlock(undefined, context);
+      this.emit('cost', context);
+
+      const limitReached = new GuardError(
+        `Maximum process-local scope count exceeded: ${this.config.maxScopes}. ` +
+          'Raise maxScopes, shorten scope identifier lifetimes, or reset the process. ' +
+          'Existing scope budgets are never evicted to make room.',
         context,
         'SCOPE_LIMIT_EXCEEDED',
-        { scopeKey }
+        {
+          scopeKey,
+          model: context.model,
+          estimatedCostUsd: safeMoney(context.estimatedCost),
+          budgetLimitUsd: this.config.budget,
+          reservedCostUsd: 0,
+          remainingUsd: this.config.budget,
+        }
       );
+      this.emit('block', context, limitReached.message, 'SCOPE_LIMIT_EXCEEDED');
+      throw limitReached;
     }
 
     const fresh = createScopeState();
-    this.state.scopes[scopeKey] = fresh;
+    defineOwnScope(this.state.scopes, scopeKey, fresh);
     return fresh;
+  }
+
+  /**
+   * Looks up an existing scope without creating one and without ever throwing.
+   *
+   * Post-call usage reconciliation runs after the provider has already been paid, so it must not be
+   * able to fail: a throw here would surface to the caller as a rejected promise for a request the
+   * provider already executed. When the scope is genuinely absent the aggregate total is still
+   * updated and the per-scope total is simply left alone.
+   */
+  private findScopeState(context: RequestContext): GuardScopeState | undefined {
+    const scopes = this.state.scopes;
+    if (!scopes) return undefined;
+
+    const scopeKey = context.scopeKey ?? createScopeKey(context.scope);
+    const existing = readOwnScope(scopes, scopeKey);
+    if (!existing) return undefined;
+
+    hydrateScopeState(existing);
+    return existing;
   }
 
   private pruneScope(scope: GuardScopeState, now: number): void {
@@ -551,7 +754,7 @@ export class GuardCore {
 
   private alertThresholdIfNeeded(scope: GuardScopeState, context: RequestContext): void {
     const thresholdUsd = this.config.budgetThresholdUsd;
-    if (thresholdUsd === undefined || scope.totalCost < thresholdUsd) return;
+    if (thresholdUsd === undefined || scope.reservedCost < thresholdUsd) return;
 
     const scopeKey = context.scopeKey ?? createScopeKey(context.scope);
     if (this.thresholdAlertedScopes.has(scopeKey)) return;
@@ -560,7 +763,7 @@ export class GuardCore {
     void sendCostGuardAlert(
       this.config.alerts,
       this.createAlertPayload('threshold', 'budget_threshold', 'warning', context, {
-        budgetUsedUsd: scope.totalCost,
+        budgetUsedUsd: scope.reservedCost,
       })
     );
   }
@@ -597,8 +800,55 @@ export class GuardCore {
 export function createGuardState(): GuardState {
   return {
     ...createScopeState(),
-    scopes: {},
+    scopes: createScopeMap(),
   };
+}
+
+/**
+ * Creates the scope map with no prototype.
+ *
+ * The map is keyed by `context.scopeKey`, which a caller supplies directly when it drives the guard
+ * through `middleware()`. A null prototype makes it structurally impossible for a scope key to
+ * resolve to a value inherited from `Object.prototype`.
+ */
+function createScopeMap(): Record<string, GuardScopeState> {
+  return Object.create(null) as Record<string, GuardScopeState>;
+}
+
+/**
+ * Reads a scope by key, ignoring anything inherited from the prototype chain.
+ *
+ * This is the second half of the guarantee `createScopeMap()` provides by default. A caller can
+ * still hand `guard()` a `GuardState` whose `scopes` is an ordinary object literal, and keys such
+ * as `__proto__`, `constructor`, or `toString` would otherwise resolve to real objects: the guard
+ * would then read and write budget balances, loop history, and counters on `Object.prototype`,
+ * corrupting every object in the process and pooling unrelated callers into one budget bucket.
+ */
+function readOwnScope(
+  scopes: Record<string, GuardScopeState>,
+  scopeKey: string
+): GuardScopeState | undefined {
+  return Object.hasOwn(scopes, scopeKey) ? scopes[scopeKey] : undefined;
+}
+
+/**
+ * Stores a scope as an own enumerable data property.
+ *
+ * Plain assignment to a `__proto__` key runs the prototype setter instead of creating a property,
+ * so the scope would never be found again and `maxScopes` would never count it. `defineProperty`
+ * creates the own property the rest of this class reads.
+ */
+function defineOwnScope(
+  scopes: Record<string, GuardScopeState>,
+  scopeKey: string,
+  scope: GuardScopeState
+): void {
+  Object.defineProperty(scopes, scopeKey, {
+    value: scope,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
 }
 
 function createScopeState(): GuardScopeState {
@@ -614,6 +864,26 @@ function createScopeState(): GuardScopeState {
     recentPrompts: [],
     recentRetries: [],
   };
+}
+
+const EMPTY_STATE_SNAPSHOT: Readonly<GuardState> = Object.freeze({
+  ...createScopeState(),
+  scopes: Object.freeze({}) as Record<string, GuardScopeState>,
+});
+
+/**
+ * Copies the aggregate counters and the scope map so event listeners cannot mutate live state.
+ *
+ * Scope objects are shared on purpose: they are hot-path objects and copying every scope on
+ * every event would be O(scopes) per guarded call.
+ */
+function snapshotState(state: GuardState): Readonly<GuardState> {
+  return { ...state, scopes: { ...state.scopes } };
+}
+
+function safeMoney(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
+  return value;
 }
 
 function hydrateScopeState(state: GuardScopeState): void {
@@ -806,10 +1076,60 @@ function normalizeScope(scope: GuardScope | undefined): GuardScope | undefined {
   return Object.values(normalized).some(Boolean) ? normalized : undefined;
 }
 
+/**
+ * Heuristic retry signal.
+ *
+ * A prompt only counts toward retry-storm detection when it carries a retry term AND either a
+ * failure term or an explicit attempt counter. Requiring both sides deliberately under-detects
+ * prompts that merely discuss retrying, because "retry" alone is ordinary instruction text.
+ */
 function hasRetrySignal(prompt: string): boolean {
-  const normalized = prompt.toLowerCase();
-  if (/\bretry(?:ing|ies)?\b/u.test(normalized)) return true;
-  return RETRY_TERMS.test(normalized) && FAILURE_TERMS.test(normalized);
+  if (!RETRY_TERMS.test(prompt)) return false;
+  return FAILURE_TERMS.test(prompt) || ATTEMPT_TERMS.test(prompt);
+}
+
+/**
+ * Builds the UNKNOWN_MODEL block message.
+ *
+ * Unknown pricing fails closed on purpose, so the message has to tell the developer exactly what
+ * to do next. When a sibling entry in the registry shares the model's family prefix, it is named
+ * along with its prices, because "register an override for the same prices" is the fix in almost
+ * every real case.
+ */
+function unknownModelReason(model: string): string {
+  const base =
+    `No pricing found for model "${model}". AI CostGuard blocks unknown models by default ` +
+    'because an uncosted call cannot be budgeted safely. ' +
+    'Register the price with registerPricing([...]) or pass guard({ pricingOverrides: [...] }).';
+
+  const sibling = findSiblingPricing(model);
+  if (!sibling) return base;
+
+  return (
+    `${base} The closest built-in entry is "${sibling.model}" ` +
+    `(input $${sibling.inputPer1kTokens}/1k, output $${sibling.outputPer1kTokens}/1k, checked ${sibling.lastUpdated}); ` +
+    'reuse those values only if they are correct for this model.'
+  );
+}
+
+function findSiblingPricing(model: string): ModelPricing | undefined {
+  const normalized = model.toLowerCase();
+
+  let best: ModelPricing | undefined;
+  let bestLength = -1;
+  for (const entry of listBuiltInPricing()) {
+    const entryModel = entry.model.toLowerCase();
+    const sharesFamily =
+      normalized.startsWith(`${entryModel}-`) ||
+      normalized.startsWith(`${entryModel}.`) ||
+      entryModel.startsWith(`${normalized}-`) ||
+      entryModel.startsWith(`${normalized}.`);
+    if (!sharesFamily || entryModel.length <= bestLength) continue;
+    best = entry;
+    bestLength = entryModel.length;
+  }
+
+  return best;
 }
 
 function extractUsage(response: unknown): { inputTokens?: number; outputTokens?: number } | undefined {
@@ -872,8 +1192,28 @@ function sanitizeCount(value: unknown): number {
   return Math.trunc(value);
 }
 
+/**
+ * Rounds a USD amount to micro-cent precision (1e-6 USD).
+ *
+ * Every stored money field and every money comparison in this file goes through this scale. The
+ * tolerance is deliberately six decimals, not two: rounding to cents would hide a real overshoot of
+ * up to $0.005 per request, which is exactly the class of bug a budget enforcer must not have.
+ */
 function roundMoney(value: number): number {
   return Math.round(sanitizeMoney(value) * 1_000_000) / 1_000_000;
+}
+
+/**
+ * Adds two USD amounts on the micro-cent scale.
+ *
+ * Raw IEEE-754 addition of many small estimates accumulates visible drift: twenty $0.05 requests
+ * sum to 0.9500000000000001, and a naive `reserved + estimated <= budget` test then rejects the
+ * twentieth request even though it costs exactly the budget it was approved against. Adding on the
+ * rounded scale keeps the stored value, the budget comparison, and the reported totals on one
+ * consistent scale, so the two can never disagree.
+ */
+function addMoney(left: number, right: number): number {
+  return roundMoney(sanitizeMoney(left) + sanitizeMoney(right));
 }
 
 function codeToAlertReason(code: GuardErrorCode): string {

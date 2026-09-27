@@ -1,4 +1,4 @@
-import { guard, GuardError } from '../../dist/index.js';
+import { guard, GuardError } from '../../dist/esm/index.js';
 
 let providerCalls = 0;
 const events = [];

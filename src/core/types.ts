@@ -17,6 +17,13 @@ export type GuardErrorCode =
   | 'RETRY_STORM_DETECTED';
 
 /**
+ * Outcome of post-call provider usage reconciliation.
+ *
+ * See `RequestContext.usageStatus`.
+ */
+export type UsageStatus = 'reported' | 'partial' | 'unavailable' | 'skipped';
+
+/**
  * Webhook destinations used by the guard when a request is blocked.
  */
 export interface GuardWebhookConfig {
@@ -133,8 +140,16 @@ export interface GuardConfig {
   };
   /** Number of retry/failure prompts allowed before a retry storm is blocked. Defaults to 2. */
   retryThreshold?: number;
-  /** Known AI SDK method paths to guard. Defaults to common OpenAI/Anthropic create methods. */
+  /** Known AI SDK method paths to guard. Defaults to DEFAULT_GUARDED_METHODS. */
   guardedMethods?: string[];
+  /**
+   * Output tokens reserved when a request sets no output limit of its own.
+   *
+   * Without this, such requests are rejected with OUTPUT_LIMIT_REQUIRED because an unbounded
+   * output reservation cannot be costed safely. Set it to guard request shapes that carry no
+   * output limit, for example embeddings or image generation.
+   */
+  defaultOutputTokens?: number;
   /** How unknown model pricing is handled. Defaults to "block". */
   unknownModelPolicy?: 'block' | 'fallback';
   /** Fallback pricing used only when unknownModelPolicy is "fallback". */
@@ -211,9 +226,12 @@ export interface GuardProConfig {
 
 /**
  * Normalized request data evaluated before an AI API call is allowed.
+ *
+ * Token and cost fields are estimates produced before the provider call. `actualCost` is the
+ * only field derived from provider-reported usage, and it is reconciled at most once.
  */
 export interface RequestContext {
-  /** Model name supplied by the request, or "unknown" when missing. */
+  /** Model name supplied by the request. Never "unknown" for a context produced by extractContext. */
   model: string;
   /** True when pricing came from the registry, overrides, or configured fallback. */
   pricingKnown: boolean;
@@ -221,21 +239,55 @@ export interface RequestContext {
   pricing?: ModelPricing;
   /** Estimated total tokens, input plus reserved output. */
   tokens: number;
-  /** Estimated input tokens. */
+  /** Estimated input tokens, including tool schemas, instructions, and media parts. */
   inputTokens?: number;
-  /** True when dependency-free approximate token counting was used. */
+  /** True when dependency-free approximate token counting was used for the text surface. */
   approximateTokens?: boolean;
   /** Reserved or requested output tokens. */
   outputTokens?: number;
-  /** Estimated USD cost for the request. */
+  /** Where the output reservation came from. */
+  outputTokensSource?: 'request' | 'default';
+  /** Estimated tokens attributed to non-text parts such as images, audio, and files. */
+  mediaTokens?: number;
+  /** Estimated tokens attributed to tool/function schemas and response-format definitions. */
+  schemaTokens?: number;
+  /** True when the request carried at least one non-text part. */
+  hasMediaInput?: boolean;
+  /** True when the request carried a tool, function, or response-format definition. */
+  hasSchemaInput?: boolean;
+  /**
+   * Estimated USD cost reserved for this request before the provider call.
+   *
+   * This is a pre-call estimate produced from the request payload and the pricing registry.
+   * It is never provider spend and never an invoice amount.
+   */
   estimatedCost: number;
-  /** Actual USD cost reconciled from a provider usage response, when available. */
+  /**
+   * Provider-reported usage cost, set only when a response exposed recognizable usage fields.
+   *
+   * Observability only. It never refunds or rewrites `estimatedCost`, and it never changes an
+   * allow/block decision that has already been made.
+   */
   actualCost?: number;
+  /**
+   * Outcome of the post-call usage reconciliation attempt.
+   *
+   * - `reported`: both usage sides were present in the response.
+   * - `partial`: one usage side was present; the other side fell back to the pre-call estimate.
+   * - `unavailable`: the call succeeded but the response carried no recognizable usage fields.
+   *   `actualCost` stays unset and the reservation remains the only cost signal.
+   * - `skipped`: reconciliation was not attempted, for example because pricing was unknown.
+   */
+  usageStatus?: UsageStatus;
+  /** True when recognizable provider usage fields were found. */
+  usageReported?: boolean;
+  /** True when only one of the provider usage fields was present and the other came from the estimate. */
+  usagePartial?: boolean;
   /** True when the request asks the provider to stream a response. */
   streaming?: boolean;
   /** Unix timestamp in milliseconds when the context was created. */
   timestamp: number;
-  /** Prompt text used for loop and retry detection. */
+  /** User-authored prompt text used for loop and retry detection. */
   prompt: string;
   /** Client method name being guarded, when known. */
   method?: string;
@@ -257,19 +309,54 @@ export interface PromptHistoryEntry {
 
 /**
  * Mutable process-local state for one scope.
+ *
+ * Accounting model. Every number below is a USD estimate except `actualCost`:
+ *
+ * ```text
+ * attemptedCost = reservedCost + blockedCost      (invariants asserted by the test suite)
+ * totalCost     = reservedCost                    (backward-compatible alias)
+ * remainingUsd  = max(0, budget - reservedCost)   (derived, never stored)
+ * ```
+ *
+ * `reservedCost` is the only value the budget decision uses. `actualCost` is additive
+ * observability data and never feeds back into a budget decision.
  */
 export interface GuardScopeState {
   /** Number of allowed requests. */
   requestCount: number;
-  /** Estimated cost reserved for allowed requests; this is the budget enforcement value. */
+  /**
+   * Sum of `estimatedCost` for every allowed request in this scope. This is the budget
+   * enforcement value.
+   *
+   * A reservation is committed inside the same synchronous turn as the budget test, and it is
+   * never released. In particular it survives a provider failure, because the guard cannot prove
+   * that a failed request created no billable operation.
+   */
   reservedCost: number;
-  /** @deprecated Use reservedCost; retained for compatibility. */
+  /**
+   * Backward-compatible alias of `reservedCost`. Always equal to it.
+   *
+   * @deprecated Read `reservedCost`. This name is kept so existing dashboards keep working.
+   */
   totalCost: number;
-  /** Estimated cost of all guarded attempts, including blocked attempts. */
+  /**
+   * Sum of `estimatedCost` for every evaluated attempt, allowed and blocked.
+   *
+   * Always `reservedCost + blockedCost`. Not provider spend.
+   */
   attemptedCost: number;
-  /** Estimated cost blocked before provider execution. */
+  /**
+   * Sum of `estimatedCost` for requests stopped before provider execution.
+   *
+   * This is money the guard *did not spend*. Never read it as realised savings without saying so.
+   */
   blockedCost: number;
-  /** Actual provider-reported spend reconciled from usage fields when available. */
+  /**
+   * Sum of provider-reported usage cost for requests that exposed recognizable usage fields.
+   *
+   * Observability only. Not an invoice, not a billing ledger, and not an input to budget
+   * decisions. Partial and unavailable reconciliations contribute nothing.
+   */
   actualCost: number;
   /** Unix timestamp in milliseconds for the last allowed request. */
   lastRequestTime: number;

@@ -1,4 +1,4 @@
-import { estimateTokensForModel } from '../dist/core/tokenizer.js';
+import { estimateTokensForModel } from '../dist/esm/core/tokenizer.js';
 
 const corpus = [
   { label: 'short english', text: 'Summarize this ticket.', referenceTokens: 5 },
@@ -100,7 +100,7 @@ const corpus = [
   },
   {
     label: 'anthropic workflow',
-    model: 'claude-sonnet-4.6',
+    model: 'claude-sonnet-4-5',
     text:
       'Claude should inspect the document, call the classifier once, and stop if confidence is below 0.7.',
     referenceTokens: 21,

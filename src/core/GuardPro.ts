@@ -20,7 +20,7 @@ function createLazyRedisClient(redisUrl: string): GuardProRedisClient {
 
     const imported = await import('ioredis').catch(() => {
       throw new Error(
-        '[AI CostGuard Pro] Redis support requires ioredis. ' +
+        '[ai-costguard] Shared budget enforcement via Redis requires the optional ioredis peer. ' +
           'Run: npm install ioredis'
       );
     });

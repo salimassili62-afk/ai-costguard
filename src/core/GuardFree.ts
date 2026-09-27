@@ -37,9 +37,15 @@ export function guard<TClient extends object>(
 
     const proxy = new Proxy(target, {
       get(currentTarget, prop, receiver) {
-        if (prop === 'on') return core.on.bind(core);
-        if (prop === 'off') return core.off.bind(core);
-        if (prop === 'getGuardState') return core.getState.bind(core);
+        // Only the root proxy carries the event controls. Intercepting these names at every nesting
+        // depth would shadow a client method that happens to be called `on`, `off`, or
+        // `getGuardState` (an EventEmitter-style client, for example), silently replacing it with
+        // the guard's own subscription API.
+        if (path.length === 0) {
+          if (prop === 'on') return core.on.bind(core);
+          if (prop === 'off') return core.off.bind(core);
+          if (prop === 'getGuardState') return core.getState.bind(core);
+        }
 
         const value = Reflect.get(currentTarget, prop, receiver) as unknown;
         const nextPath = typeof prop === 'string' ? [...path, prop] : path;
@@ -94,12 +100,14 @@ export function guardFunction<TArgs extends readonly unknown[], TResult>(
   config: GuardConfig = {}
 ): ((...args: TArgs) => TResult) & GuardEventControls {
   const methodName = config.guardedMethods?.[0] ?? 'run';
-  const container = { [methodName]: fn } as Record<string, (...args: TArgs) => TResult>;
+  // The function is parked one level down because the root proxy owns the `on`/`off`/
+  // `getGuardState` controls. A method literally named `on` would otherwise be unreachable.
+  const container = { fn: { [methodName]: fn } } as Record<string, Record<string, (...args: TArgs) => TResult>>;
   const guarded = guard(container, {
     ...config,
-    guardedMethods: [methodName],
+    guardedMethods: [`fn.${methodName}`],
   });
-  const guardedFn = ((...args: TArgs) => guarded[methodName](...args)) as ((...args: TArgs) => TResult) &
+  const guardedFn = ((...args: TArgs) => guarded.fn[methodName](...args)) as ((...args: TArgs) => TResult) &
     GuardEventControls;
 
   guardedFn.on = guarded.on;

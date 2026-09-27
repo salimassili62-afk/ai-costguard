@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { GuardError } from '../dist/index.js';
-import { GuardPro, getProGuard } from '../dist/pro.js';
+import { GuardError } from '../dist/esm/index.js';
+import { GuardPro, getProGuard } from '../dist/esm/pro.js';
 
 class FakeRedis {
   status = 'wait';

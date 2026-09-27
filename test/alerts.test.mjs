@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { guard, GuardError } from '../dist/index.js';
-import { GuardCore } from '../dist/core/GuardCore.js';
+import { guard, GuardError } from '../dist/esm/index.js';
+import { GuardCore } from '../dist/esm/core/GuardCore.js';
 
 function createClient() {
   let calls = 0;

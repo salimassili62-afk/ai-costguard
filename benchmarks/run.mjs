@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
-import { guardFunction } from '../dist/index.js';
-import { GuardCore, GuardError } from '../dist/core/GuardCore.js';
-import { estimateRequestTokens } from '../dist/core/tokenizer.js';
+import { guardFunction } from '../dist/esm/index.js';
+import { GuardCore, GuardError } from '../dist/esm/core/GuardCore.js';
+import { estimateRequestTokens } from '../dist/esm/core/tokenizer.js';
 
 const iterations = readIterations(process.argv.slice(2));
 

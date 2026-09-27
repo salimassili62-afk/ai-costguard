@@ -16,14 +16,14 @@ const anthropic = guard(fakeAnthropic, {
 });
 
 await anthropic.messages.create({
-  model: 'claude-haiku-4.5',
+  model: 'claude-haiku-4-5',
   max_tokens: 100,
   messages: [{ role: 'user', content: 'Draft a short workflow summary.' }],
 });
 
 try {
   await anthropic.messages.create({
-    model: 'claude-haiku-4.5',
+    model: 'claude-haiku-4-5',
     max_tokens: 1000,
     messages: [{ role: 'user', content: 'Draft a much longer workflow summary.' }],
   });

@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { guard, guardFunction, GuardError, middleware } from '../dist/index.js';
+import { guard, guardFunction, GuardError, middleware } from '../dist/esm/index.js';
+import { daysAgo } from './helpers/dates.mjs';
 
 function createClient() {
   let calls = 0;
@@ -147,7 +148,7 @@ test('guard ignores non-AI methods by default and supports explicit method filte
           model: 'custom-model',
           inputPer1kTokens: 0.001,
           outputPer1kTokens: 0.002,
-          lastUpdated: '2026-06-07',
+          lastUpdated: daysAgo(1),
           source: 'unit-test',
         },
       ],
@@ -176,7 +177,7 @@ test('guard keeps shared nested objects isolated by method path', async () => {
           model: 'shared-model',
           inputPer1kTokens: 0.001,
           outputPer1kTokens: 0.001,
-          lastUpdated: '2026-08-23',
+          lastUpdated: daysAgo(1),
           source: 'unit-test',
         },
       ],
@@ -211,6 +212,73 @@ test('guardFunction protects standalone AI functions and exposes guard controls'
   assert.equal(calls, 1);
   assert.deepEqual(events, ['allow']);
   assert.equal(runModel.getGuardState().requestCount, 1);
+});
+
+test('guard event controls exist only on the root proxy, never shadowing client methods', async () => {
+  // `on`, `off`, and `getGuardState` are the guard's own controls. Intercepting them at every
+  // nesting depth silently replaced any client method with the same name, so an EventEmitter-style
+  // client would stop working the moment it was guarded.
+  const client = {
+    on: () => 'root-on',
+    nested: {
+      on: () => 'nested-on',
+      off: () => 'nested-off',
+      getGuardState: () => 'nested-state',
+    },
+  };
+
+  const guarded = guard(client, { budget: 1, behaviorAnalysis: false });
+
+  // The root is the one documented exception: the guard's controls live there, so a root-level
+  // client method with the same name is shadowed. Nested access is never affected.
+  assert.notEqual(guarded.on, client.on, 'at the root the guard control takes precedence, as documented');
+  assert.equal(guarded.nested.on(), 'nested-on', 'a nested client `on` must not be shadowed');
+  assert.equal(guarded.nested.off(), 'nested-off', 'a nested client `off` must not be shadowed');
+  assert.equal(guarded.nested.getGuardState(), 'nested-state', 'a nested client getGuardState must not be shadowed');
+  assert.equal(client.nested.on(), 'nested-on', 'the unwrapped client is untouched');
+
+  // The guard controls are still available and still receive events, on the root proxy.
+  const events = [];
+  const unsubscribe = guarded.on('allow', (event) => events.push(event.type));
+  assert.equal(typeof unsubscribe, 'function');
+  unsubscribe();
+
+  const costed = guard(createClient(), { budget: 1, behaviorAnalysis: false });
+  const seen = [];
+  costed.on('allow', (event) => seen.push(event.type));
+  await costed.chat.completions.create({
+    model: 'gpt-4o-mini',
+    prompt: 'root control still receives events',
+    max_tokens: 5,
+  });
+  assert.deepEqual(seen, ['allow'], 'the root proxy still delivers guard events');
+  assert.equal(costed.getGuardState().requestCount, 1);
+});
+
+test('guardFunction can protect a function whose method name collides with a guard control', async () => {
+  // The function is parked one level below the root proxy precisely so a name such as `on` cannot
+  // resolve to the guard's subscription API instead of the caller's function.
+  for (const methodName of ['on', 'off', 'getGuardState', 'run']) {
+    let calls = 0;
+    const guardedFn = guardFunction(
+      async () => {
+        calls += 1;
+        return { ok: true, usage: { prompt_tokens: 5, completion_tokens: 5 } };
+      },
+      { budget: 1, behaviorAnalysis: false, guardedMethods: [methodName] }
+    );
+
+    const result = await guardedFn({
+      model: 'gpt-4o-mini',
+      prompt: `standalone function named ${methodName}`,
+      max_tokens: 5,
+    });
+
+    assert.equal(result.ok, true, `guardFunction must still call the function when named "${methodName}"`);
+    assert.equal(calls, 1, `guardFunction must call the function exactly once when named "${methodName}"`);
+    assert.equal(guardedFn.getGuardState().requestCount, 1, `"${methodName}" must still be cost-checked`);
+    assert.equal(typeof guardedFn.on, 'function', 'the guard subscription control is still exposed');
+  }
 });
 
 test('guard writes redacted JSONL event logs for local dashboard use', async () => {

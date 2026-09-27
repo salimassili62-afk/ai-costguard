@@ -47,4 +47,13 @@ export class GuardEventEmitter {
       }
     }
   }
+
+  /**
+   * Returns true when at least one event name has a subscriber.
+   *
+   * Lets the guard skip building unused state snapshots on the guarded hot path.
+   */
+  hasHandlers(): boolean {
+    return this.handlers.size > 0;
+  }
 }

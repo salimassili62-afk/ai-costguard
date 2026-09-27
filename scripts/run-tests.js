@@ -10,7 +10,7 @@ const args = [
   '--lines=80',
   '--functions=80',
   '--branches=70',
-  '--include=dist/**/*.js',
+  '--include=dist/esm/**/*.js',
   '--reporter=text',
   process.execPath,
   '--test',

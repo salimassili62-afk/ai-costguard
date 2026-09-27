@@ -68,11 +68,16 @@ const anthropic = guard(new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 });
 
 await anthropic.messages.create({
-  model: 'claude-haiku-4.5',
+  model: 'claude-haiku-4-5',
   max_tokens: 300,
   messages: [{ role: 'user', content: 'Draft the daily workflow summary.' }],
 });
 ```
+
+Anthropic model names in the built-in registry use dashes for the date segment
+(`claude-haiku-4-5`), not dots. A dotted spelling such as `claude-haiku-4.5` is **not** a family
+match and is blocked as an unknown model; see the family-prefix table in
+[ACCOUNTING.md](./ACCOUNTING.md#unknown-models).
 
 Runnable mock: `examples/integrations/anthropic-workflow-budget.mjs`
 

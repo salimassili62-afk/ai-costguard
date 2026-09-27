@@ -7,6 +7,7 @@ landing/node_modules/
 landing/.next/
 landing/.vercel/
 landing/out/
+templates/*/node_modules/
 *.log
 *.tgz
 *.zip
@@ -17,6 +18,7 @@ zip-test/
 zip-test-final/
 .ai-costguard/
 .ai-execution-firewall/
+.test-home/
 .DS_Store
 
 # Environment variables

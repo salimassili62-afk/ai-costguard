@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const cliPath = join(here, '..', '..', 'dist', 'cli.js');
+// The published CLI lives at dist/esm/cli.js; dist/cjs/cli.js is the CommonJS build of the same file.
+const cliPath = join(here, '..', '..', 'dist', 'esm', 'cli.js');
 
 const result = spawnSync(
   process.execPath,

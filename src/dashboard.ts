@@ -160,7 +160,17 @@ export function startDashboardServer(options: DashboardOptions = {}): Promise<{ 
     );
   }
   const server = createServer((request, response) => {
-    const summary = summarizeDashboard(options);
+    // An exception escaping this handler is an uncaughtException that kills the whole process,
+    // including the guarded application this dashboard was started from. A dashboard is
+    // observability only, so a bad log file or a rendering surprise becomes a 500, not a crash.
+    let summary: DashboardSummary;
+    try {
+      summary = summarizeDashboard(options);
+    } catch {
+      response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+      response.end(`Could not read the event log at ${options.eventLogPath ?? DEFAULT_EVENT_LOG_PATH}.\n`);
+      return;
+    }
 
     if (request.url?.startsWith('/events.json')) {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -168,8 +178,13 @@ export function startDashboardServer(options: DashboardOptions = {}): Promise<{ 
       return;
     }
 
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(renderDashboardHtml(summary));
+    try {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(renderDashboardHtml(summary));
+    } catch {
+      response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+      response.end('Could not render the dashboard.\n');
+    }
   });
 
   return new Promise((resolve, reject) => {
@@ -250,15 +265,54 @@ function metric(label: string, value: string): string {
   return `<div class="metric"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`;
 }
 
+/**
+ * Validates one JSONL line into a dashboard event.
+ *
+ * Every field the renderer dereferences is type-checked here, not downstream. The renderer calls
+ * `String.prototype.replaceAll` and `Number.prototype.toFixed` on these values, and a log file can
+ * be hand-edited, truncated, or produced by an older version, so a single line with a number where
+ * a string belongs would otherwise throw inside the request handler and take the whole process
+ * down. Anything that does not match the documented shape is skipped instead.
+ */
 function parseDashboardEvent(line: string): DashboardEvent | undefined {
+  let value: Partial<DashboardEvent>;
   try {
-    const value = JSON.parse(line) as Partial<DashboardEvent>;
-    if (value.version !== 1 || !value.timestamp || !value.type || !value.model || !value.scopeKey) return undefined;
-    if (typeof value.estimatedCost !== 'number' || typeof value.tokens !== 'number') return undefined;
-    return value as DashboardEvent;
+    value = JSON.parse(line) as Partial<DashboardEvent>;
   } catch {
     return undefined;
   }
+
+  if (value === null || typeof value !== 'object') return undefined;
+  if (value.version !== 1) return undefined;
+  if (!isNonEmptyString(value.timestamp)) return undefined;
+  if (!isGuardEventName(value.type)) return undefined;
+  if (!isNonEmptyString(value.model)) return undefined;
+  if (!isNonEmptyString(value.scopeKey)) return undefined;
+  if (!isFiniteNumber(value.estimatedCost) || value.estimatedCost < 0) return undefined;
+  if (!isFiniteNumber(value.tokens) || value.tokens < 0) return undefined;
+  if (value.code !== undefined && !isNonEmptyString(value.code)) return undefined;
+  if (value.reason !== undefined && typeof value.reason !== 'string') return undefined;
+  if (value.method !== undefined && typeof value.method !== 'string') return undefined;
+  if (value.actualCost !== undefined && (!isFiniteNumber(value.actualCost) || value.actualCost < 0)) return undefined;
+  if (value.inputTokens !== undefined && (!isFiniteNumber(value.inputTokens) || value.inputTokens < 0)) return undefined;
+  if (value.outputTokens !== undefined && (!isFiniteNumber(value.outputTokens) || value.outputTokens < 0)) return undefined;
+  if (value.promptPreview !== undefined && typeof value.promptPreview !== 'string') return undefined;
+
+  return value as DashboardEvent;
+}
+
+const GUARD_EVENT_NAMES: readonly string[] = ['block', 'allow', 'cost', 'usage'];
+
+function isGuardEventName(value: unknown): value is GuardEventName {
+  return typeof value === 'string' && GUARD_EVENT_NAMES.includes(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function sum(values: readonly number[]): number {
@@ -274,8 +328,8 @@ function round(value: number, digits: number): number {
   return Math.round(value * factor) / factor;
 }
 
-function escapeHtml(value: string): string {
-  return value
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')

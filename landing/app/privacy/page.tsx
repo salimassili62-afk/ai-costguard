@@ -14,8 +14,9 @@ export default function PrivacyPage() {
           </p>
 
           <ul className="mb-4 list-disc pl-5 text-sm text-gray-300">
-            <li>No data is collected by AI CostGuard.</li>
+            <li>No data is collected by AI CostGuard. The library makes no network request of any kind unless you configure a webhook URL yourself.</li>
             <li>No account, no login, and no data storage is required.</li>
+            <li>No telemetry, analytics, crash reporting, or remote profiling is present in the package.</li>
             <li>The npm package runs locally on your machine; provider calls are
               executed by you and not logged by this project.</li>
           </ul>
