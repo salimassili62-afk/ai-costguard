@@ -1,6 +1,6 @@
 {
   "name": "@salimassili/ai-costguard",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "In-process pre-call spend enforcement and agent execution policy for Node.js AI agents. Blocks over-budget calls, prompt loops, retry storms, and max-step overruns before the provider request executes.",
   "type": "module",
   "main": "./dist/cjs/index.js",
