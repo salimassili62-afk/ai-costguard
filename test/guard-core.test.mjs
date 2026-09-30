@@ -24,6 +24,141 @@ test('token estimator calibrates normal English without extreme overestimation',
   assert.equal(request.tokens, request.inputTokens + 10);
 });
 
+test('token estimator reserves every billed candidate and every billed prompt', () => {
+  const single = estimateRequestTokens({
+    messages: [{ role: 'user', content: 'hello world' }],
+    max_tokens: 100,
+  });
+  const fourChoices = estimateRequestTokens({
+    messages: [{ role: 'user', content: 'hello world' }],
+    max_tokens: 100,
+    n: 4,
+  });
+
+  assert.equal(single.candidateCount, 1);
+  assert.equal(single.promptCount, 1);
+  assert.equal(single.outputTokensPerCandidate, 100);
+  assert.equal(single.outputTokens, 100);
+
+  assert.equal(fourChoices.candidateCount, 4);
+  assert.equal(fourChoices.outputTokensPerCandidate, 100);
+  assert.equal(fourChoices.outputTokens, 400);
+  assert.equal(fourChoices.inputTokens, single.inputTokens, 'input is billed once for n>1');
+  assert.equal(fourChoices.tokens, fourChoices.inputTokens + 400);
+
+  const batched = estimateRequestTokens({
+    model: 'gpt-3.5-turbo-instruct',
+    prompt: ['first prompt', 'second prompt', 'third prompt'],
+    max_tokens: 50,
+  });
+  assert.equal(batched.promptCount, 3);
+  assert.ok(batched.inputTokens > single.inputTokens, 'a prompt array is billed once per prompt');
+
+  const conversation = estimateRequestTokens({
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }, { role: 'user', content: 'c' }],
+    max_tokens: 10,
+  });
+  assert.equal(conversation.promptCount, 1, 'a message array is one conversation, not a batch');
+
+  const responsesInput = estimateRequestTokens({ model: 'gpt-4o-mini', input: [{ role: 'user', content: 'a' }], max_tokens: 10 });
+  assert.equal(responsesInput.promptCount, 1);
+});
+
+test('token estimator ignores unbilled candidate controls and clamps absurd counts', () => {
+  const bestOf = estimateRequestTokens({
+    messages: [{ role: 'user', content: 'hello world' }],
+    max_tokens: 100,
+    best_of: 8,
+  });
+  assert.equal(bestOf.candidateCount, 1, 'legacy best_of is not billed');
+  assert.equal(bestOf.outputTokens, 100);
+
+  for (const [n, expected] of [[0, 1], [-3, 1], [2.4, 3], [5_000, 1_000]]) {
+    const estimate = estimateRequestTokens({ messages: [{ role: 'user', content: 'x' }], max_tokens: 10, n });
+    assert.equal(estimate.candidateCount, expected);
+  }
+});
+
+test('GuardCore charges every candidate, including the default output reservation', () => {
+  const core = new GuardCore({ budget: 1 });
+  const base = core.extractContext([{ model: 'gpt-4o-mini', prompt: 'pick one', max_tokens: 1_000 }]);
+  const batched = core.extractContext([{ model: 'gpt-4o-mini', prompt: 'pick one', max_tokens: 1_000, n: 5 }]);
+
+  assert.equal(base.outputTokens, 1_000);
+  assert.equal(batched.outputTokens, 5_000);
+  assert.equal(batched.candidateCount, 5);
+  assert.ok(
+    Math.abs(batched.estimatedCost - base.estimatedCost * 5 + (base.inputTokens / 1000) * 4 * 0.00015) < 1e-12,
+    `unexpected cost scaling: ${batched.estimatedCost} vs ${base.estimatedCost}`
+  );
+
+  const defaulted = new GuardCore({ budget: 1, defaultOutputTokens: 200 });
+  const defaultedContext = defaulted.extractContext([{ model: 'gpt-4o-mini', prompt: 'pick one', n: 3 }]);
+  assert.equal(defaultedContext.outputTokensSource, 'default');
+  assert.equal(defaultedContext.outputTokens, 600);
+});
+
+test('GuardCore allows a charge that lands exactly on a float-derived budget', () => {
+  // `checkBudget` compares in integer micro-dollars so that a budget the caller derived by float
+  // arithmetic cannot reject a call that costs exactly that budget. The request below costs
+  // 0.012006000000000001 as a float, so `perCall * 2` is one ULP above the 0.012006 micro-dollar grid
+  // the accumulated total lands on; comparing the raw floats blocks the second charge. This also
+  // keeps the in-process decision identical to the shared Redis path, which allows `projected >
+  // budget` only when the integer values differ.
+  //
+  // The price is pinned through `pricingOverrides` rather than read from the built-in registry: this
+  // test is about float behaviour in `checkBudget`, so it must not start failing the next time a
+  // verified registry price changes.
+  const PRICING_OVERRIDES = [
+    {
+      model: 'float-drift-unit-model',
+      inputPer1kTokens: 0.003,
+      outputPer1kTokens: 0.003,
+      lastUpdated: daysAgo(1),
+      source: 'unit-test',
+    },
+  ];
+  const call = (core) =>
+    core.extractContext([{ model: 'float-drift-unit-model', prompt: 'x', max_tokens: 4000 }]);
+
+  const probe = new GuardCore({ budget: 1, pricingOverrides: PRICING_OVERRIDES });
+  const perCall = call(probe).estimatedCost;
+  // The point of the test is that `perCall * 2` is not the same float as the accumulated total, so
+  // assert the premise holds rather than hardcoding a literal.
+  const accumulated = (Math.round(perCall * 1_000_000) + Math.round(perCall * 1_000_000)) / 1_000_000;
+  assert.notEqual(perCall * 2, accumulated, 'expected a float-artefact premise to hold');
+
+  const core = new GuardCore({ budget: perCall * 2, pricingOverrides: PRICING_OVERRIDES });
+  core.check(call(core));
+  assert.doesNotThrow(() => core.check(call(core)), 'the second charge lands exactly on the budget');
+
+  // One micro-dollar beyond the budget is still refused, so the comparison did not simply widen.
+  const tight = new GuardCore({
+    budget: perCall * 2 - 0.000001,
+    pricingOverrides: PRICING_OVERRIDES,
+  });
+  tight.check(call(tight));
+  assert.throws(
+    () => tight.check(call(tight)),
+    (error) => error.code === 'BUDGET_EXCEEDED',
+    'a charge one micro-dollar over the budget must still be blocked'
+  );
+});
+
+test('GuardCore blocks a batched request that a per-candidate estimate would have allowed', () => {
+  const core = new GuardCore({ budget: 0.001 });
+  const message = { role: 'user', content: 'summarize this ticket' };
+
+  core.check(core.extractContext([{ model: 'gpt-4o-mini', messages: [message], max_tokens: 1_000 }]));
+
+  const batched = new GuardCore({ budget: 0.001 });
+  assert.throws(
+    () => batched.check(batched.extractContext([{ model: 'gpt-4o-mini', messages: [message], max_tokens: 1_000, n: 4 }])),
+    (error) => error instanceof GuardError && error.code === 'BUDGET_EXCEEDED'
+  );
+});
+
 test('token estimator calibrates code, structured payloads, Claude-family, and unknown models', () => {
   const code = estimateTokensForModel(
     'gpt-4o-mini',
@@ -401,6 +536,14 @@ test('GuardCore isolates behavior history by scope and prunes expired history', 
   assert.equal(scopeA.recentPrompts.length, 1);
 });
 
+/** Rewinds every scope's last-activity clock so reclamation can be exercised without waiting. */
+function backdateScopes(core, ms) {
+  const backdated = Date.now() - ms;
+  for (const scope of Object.values(core.getState().scopes ?? {})) {
+    scope.lastRequestTime = backdated;
+  }
+}
+
 test('GuardCore uses collision-resistant scope keys and bounds scope creation', () => {
   const core = new GuardCore({ budget: 1, maxScopes: 2 });
   const first = core.extractContext([
@@ -419,6 +562,96 @@ test('GuardCore uses collision-resistant scope keys and bounds scope creation', 
     () => core.check(third),
     (error) => error instanceof GuardError && error.code === 'SCOPE_LIMIT_EXCEEDED'
   );
+});
+
+test('GuardCore reclaims only idle session scopes when scopeIdleTtlMs is set', () => {
+  const request = (sessionId) =>
+    new GuardCore({ budget: 1 }).extractContext([
+      { model: 'gpt-4o-mini', prompt: 'work', max_tokens: 1, sessionId },
+    ]);
+
+  const withoutTtl = new GuardCore({ budget: 1, maxScopes: 2 });
+  withoutTtl.check(request('s1'));
+  withoutTtl.check(request('s2'));
+  backdateScopes(withoutTtl, 60_000);
+  assert.throws(
+    () => withoutTtl.check(request('s3')),
+    (error) => error instanceof GuardError && error.code === 'SCOPE_LIMIT_EXCEEDED',
+    'idle scopes are never dropped without an explicit scopeIdleTtlMs'
+  );
+  assert.equal(withoutTtl.getState().reclaimedScopeCount ?? 0, 0);
+
+  const withTtl = new GuardCore({ budget: 1, maxScopes: 2, scopeIdleTtlMs: 1_000 });
+  withTtl.check(request('s1'));
+  withTtl.check(request('s2'));
+  backdateScopes(withTtl, 60_000);
+  withTtl.check(request('s3'));
+
+  const state = withTtl.getState();
+  assert.equal(state.reclaimedScopeCount, 2);
+  assert.equal(Object.keys(state.scopes).length, 1);
+  assert.ok(state.reservedCost > 0, 'process-wide spend survives reclamation');
+});
+
+test('GuardCore never reclaims long-lived or still-active scopes', () => {
+  const longLived = new GuardCore({ budget: 1, maxScopes: 2, scopeIdleTtlMs: 1_000 });
+  longLived.check(longLived.extractContext([{ model: 'gpt-4o-mini', prompt: 'a', max_tokens: 1, projectId: 'p1' }]));
+  longLived.check(longLived.extractContext([{ model: 'gpt-4o-mini', prompt: 'b', max_tokens: 1, userId: 'u1' }]));
+  backdateScopes(longLived, 60_000);
+  assert.throws(
+    () => longLived.check(longLived.extractContext([{ model: 'gpt-4o-mini', prompt: 'c', max_tokens: 1, projectId: 'p2' }])),
+    (error) => error instanceof GuardError && error.code === 'SCOPE_LIMIT_EXCEEDED',
+    'project and user scopes are never evicted'
+  );
+
+  const active = new GuardCore({ budget: 1, maxScopes: 2, scopeIdleTtlMs: 60_000 });
+  active.check(active.extractContext([{ model: 'gpt-4o-mini', prompt: 'a', max_tokens: 1, sessionId: 'live' }]));
+  active.check(active.extractContext([{ model: 'gpt-4o-mini', prompt: 'b', max_tokens: 1, sessionId: 'also-live' }]));
+  assert.throws(
+    () => active.check(active.extractContext([{ model: 'gpt-4o-mini', prompt: 'c', max_tokens: 1, sessionId: 'new' }])),
+    (error) => error instanceof GuardError && error.code === 'SCOPE_LIMIT_EXCEEDED',
+    'a session that is still inside the TTL is never evicted'
+  );
+});
+
+test('GuardCore gives a reclaimed session a fresh budget without moving the aggregate', () => {
+  const core = new GuardCore({ budget: 0.001, maxScopes: 2, scopeIdleTtlMs: 1_000 });
+  const call = (sessionId) =>
+    core.extractContext([{ model: 'gpt-4o-mini', prompt: 'spend', max_tokens: 1_000, sessionId }]);
+  const perCall = 0.0006;
+
+  core.check(call('s1'));
+  core.check(call('s2'));
+  assert.throws(() => core.check(call('s1')), (error) => error instanceof GuardError && error.code === 'BUDGET_EXCEEDED');
+
+  backdateScopes(core, 60_000);
+  core.check(call('s3'));
+  assert.equal(core.getState().reclaimedScopeCount, 2);
+
+  // s1 returns after its scope was reclaimed, so it starts from a fresh per-session budget.
+  core.check(call('s1'));
+  assert.equal(core.getState().reclaimedScopeCount, 2, 'no further sweep is needed below the cap');
+
+  const state = core.getState();
+  assert.equal(Object.keys(state.scopes).length, 2);
+  assert.ok(
+    Math.abs(state.reservedCost - perCall * 4) < 1e-12,
+    `the process-wide aggregate must keep every reservation, including reclaimed scopes, got ${state.reservedCost}`
+  );
+  assert.equal(
+    Math.abs(state.scopes['[null,null,"s1",null]'].reservedCost - perCall) < 1e-12,
+    true,
+    'only the per-scope balance was reset'
+  );
+});
+
+test('GuardCore rejects an invalid scopeIdleTtlMs', () => {
+  for (const scopeIdleTtlMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => new GuardCore({ budget: 1, scopeIdleTtlMs }),
+      (error) => error instanceof GuardError && error.code === 'CONFIG_INVALID' && /scopeIdleTtlMs/u.test(error.message)
+    );
+  }
 });
 
 test('GuardCore records actual usage when provider responses include usage fields', () => {

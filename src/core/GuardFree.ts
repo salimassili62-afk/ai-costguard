@@ -119,15 +119,23 @@ export function guardFunction<TArgs extends readonly unknown[], TResult>(
 
 /**
  * Express-compatible middleware that attaches req.localSafety.check() and req.guard.check().
+ *
+ * Prefer `checkRequest()` when the caller holds an OpenAI-like request object. It lets the guard
+ * derive the cost itself, so the reported spend cannot be under-stated by the caller. `check()`
+ * remains available for callers that already hold a `RequestContext` and have costed the request
+ * through their own pipeline.
  */
 export function middleware(config: GuardConfig = {}): (req: MiddlewareRequest, res: unknown, next: () => void) => void {
   const core = new GuardCore(config);
 
   return (req: MiddlewareRequest, _res: unknown, next: () => void) => {
-    const controls = {
+    const controls: MiddlewareControls = {
       state: core.getState(),
       check: (context: RequestContext) => {
         core.check(context);
+      },
+      checkRequest: (request: unknown) => {
+        core.check(core.extractContext([request]));
       },
       on: core.on.bind(core),
       off: core.off.bind(core),
@@ -149,14 +157,33 @@ export { GuardError };
  */
 export { getPricing } from '../pricing/index.js';
 
-interface MiddlewareRequest {
+/**
+ * Request object that `middleware()` attaches its controls to.
+ */
+export interface MiddlewareRequest {
   localSafety?: MiddlewareControls;
   guard?: MiddlewareControls;
 }
 
-interface MiddlewareControls {
+/**
+ * Per-request guard controls attached by `middleware()`.
+ */
+export interface MiddlewareControls {
   state: GuardState;
+  /**
+   * Evaluates a caller-built request context.
+   *
+   * The guard trusts `context.estimatedCost` exactly as supplied, so a caller that reports $0
+   * reserves $0 and its budget never moves. Reach for this only when the context was produced by
+   * the guard itself.
+   */
   check(context: RequestContext): void;
+  /**
+   * Evaluates an OpenAI-like request object and costs it with the guard's own tokenizer and
+   * pricing table. The estimate cannot be under-stated by the caller, so this is the safe default
+   * for hand-rolled integrations.
+   */
+  checkRequest(request: unknown): void;
   on(eventName: GuardEventName, handler: GuardEventHandler): () => void;
   off(eventName: GuardEventName, handler: GuardEventHandler): void;
 }

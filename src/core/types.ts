@@ -121,6 +121,26 @@ export interface GuardConfig {
   maxHistory?: number;
   /** Maximum number of process-local scopes retained. Defaults to 10,000. */
   maxScopes?: number;
+  /**
+   * Opt-in idle lifetime for reclaimable scopes, in milliseconds.
+   *
+   * Without this, `maxScopes` counts every scope the process has ever seen, so a long-running
+   * server that scopes requests by `sessionId` or `runId` eventually blocks every new scope with
+   * `SCOPE_LIMIT_EXCEEDED`. Setting this lets the guard drop idle scopes when the map is full.
+   *
+   * Only scopes identified purely by `sessionId`/`runId` are eligible, and only after they have
+   * been idle for this long. `projectId` and `userId` scopes and the implicit default scope are
+   * never reclaimed, and the process-wide counters are never reset. A returning idle session
+   * therefore starts a fresh per-session budget, so choose a TTL at least as long as a session is
+   * expected to live.
+   *
+   * `budget` is a **per-scope** ceiling, not a per-process one. The process-wide counters are
+   * reporting only and are never consulted when deciding to block, so a caller that keeps
+   * introducing new `sessionId`/`runId` values can spend more than `budget` in total. Scope by
+   * `projectId`/`userId`, or use the shared-budget `GuardPro` path, when a hard process-wide
+   * ceiling is required.
+   */
+  scopeIdleTtlMs?: number;
   /** Prompt/retry history TTL in milliseconds. Defaults to 5 minutes. */
   historyTtlMs?: number;
   /** Optional maximum number of allowed guarded calls in the current process. */
@@ -243,10 +263,14 @@ export interface RequestContext {
   inputTokens?: number;
   /** True when dependency-free approximate token counting was used for the text surface. */
   approximateTokens?: boolean;
-  /** Reserved or requested output tokens. */
+  /** Reserved or requested output tokens, summed across every billed candidate. */
   outputTokens?: number;
   /** Where the output reservation came from. */
   outputTokensSource?: 'request' | 'default';
+  /** Number of separately billed completions the request asked for. At least 1. */
+  candidateCount?: number;
+  /** Number of separately billed prompts. Greater than 1 only for legacy prompt arrays. */
+  promptCount?: number;
   /** Estimated tokens attributed to non-text parts such as images, audio, and files. */
   mediaTokens?: number;
   /** Estimated tokens attributed to tool/function schemas and response-format definitions. */
@@ -358,7 +382,13 @@ export interface GuardScopeState {
    * decisions. Partial and unavailable reconciliations contribute nothing.
    */
   actualCost: number;
-  /** Unix timestamp in milliseconds for the last allowed request. */
+  /**
+   * Unix timestamp in milliseconds for the last checked request, allowed or blocked.
+   *
+   * Blocked attempts count because they prove the scope is still in use. A scope that only ever
+   * gets blocked holds no reserved cost, so reclaiming it as idle would hand its budget back to a
+   * client that is still being denied requests.
+   */
   lastRequestTime: number;
   /** Number of blocked requests. */
   blockedCount: number;
@@ -368,6 +398,11 @@ export interface GuardScopeState {
   recentRetries?: PromptHistoryEntry[];
   /** Optional session expiry timestamp used by stateful guards. */
   sessionExpiresAt?: number;
+  /**
+   * True when this scope was created from a short-lived `sessionId`/`runId` identity and may be
+   * dropped once idle. See `GuardConfig.scopeIdleTtlMs`.
+   */
+  reclaimable?: boolean;
 }
 
 /**
@@ -376,6 +411,13 @@ export interface GuardScopeState {
 export interface GuardState extends GuardScopeState {
   /** Per-scope state keyed by project/user/session. */
   scopes?: Record<string, GuardScopeState>;
+  /**
+   * Number of idle session/run scopes dropped to keep the scope count under `maxScopes`.
+   *
+   * Always 0 unless `scopeIdleTtlMs` is configured. Process-wide counters are never reset by
+   * reclamation, so this counts reclaimed scopes, not reclaimed spend.
+   */
+  reclaimedScopeCount?: number;
 }
 
 /**

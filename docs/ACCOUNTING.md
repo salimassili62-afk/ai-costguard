@@ -147,7 +147,7 @@ When the unknown name is a prefix-extension of a built-in family, the message al
 entry and its prices:
 
 ```
-No pricing found for model "gpt-4o.5". AI CostGuard blocks unknown models by default because an uncosted call cannot be budgeted safely. Register the price with registerPricing([...]) or pass guard({ pricingOverrides: [...] }). The closest built-in entry is "gpt-4o" (input $0.005/1k, output $0.015/1k, checked 2026-08-23); reuse those values only if they are correct for this model.
+No pricing found for model "gpt-4o.5". AI CostGuard blocks unknown models by default because an uncosted call cannot be budgeted safely. Register the price with registerPricing([...]) or pass guard({ pricingOverrides: [...] }). The closest built-in entry is "gpt-4o" (input $0.0025/1k, output $0.01/1k, checked 2026-09-30); reuse those values only if they are correct for this model.
 ```
 
 The closest entry is found by shared model-family prefix and is only a starting point. The message
@@ -164,25 +164,32 @@ starts with a built-in name plus `-` or `:`, it is costed at that entry's price,
 | `gpt-4.1` | `gpt-4.1` | `exact` |
 | `gpt-4.1-turbo` | `gpt-4.1` | `family-prefix` |
 | `gpt-5-ultra` | `gpt-5` | `family-prefix` |
-| `o3-pro` | `o3` | `family-prefix` |
+| `gpt-4o-realtime-preview` | `gpt-4o` | `family-prefix` |
+| `o3-pro` | `o3-pro` | `exact` |
 | `claude-sonnet-4-5-20260101` | `claude-sonnet-4-5` | `family-prefix` |
 | `claude-haiku-4.5` | *(none)* | *(blocked)* |
 | `totally-made-up-model` | *(none)* | *(blocked)* |
 
 This is deliberate for dated model snapshots, where a new date on an existing model genuinely has the
 same price. It also means a model the registry has never heard of can be costed at a **guessed**
-price. `o3-pro` is priced here at the `o3` rate, which is not the real `o3-pro` rate, so the
-reservation can under- or over-count against a real invoice. The call is still costed and the budget
-still moves; what changes is how much you should trust the number.
+price. `gpt-4o-realtime-preview` is priced here at the `gpt-4o` rate, which is not the real
+`gpt-4o-realtime-preview` rate, so the reservation can under- or over-count against a real invoice.
+The call is still costed and the budget still moves; what changes is how much you should trust the
+number.
+
+Note that `o3-pro` resolves as `exact` because the registry pins it explicitly. Longest-family-first
+matching only applies once a family has a cheaper entry to fall back from, so any published variant
+that is priced differently from its family must be added as its own entry; see
+[Which models are priced](#which-models-are-priced).
 
 `getPricingMeta()` makes the distinction checkable:
 
 ```ts
 import { getPricingMeta } from '@salimassili/ai-costguard';
 
-const meta = getPricingMeta('o3-pro');
+const meta = getPricingMeta('gpt-4o-realtime-preview');
 meta?.match;        // 'family-prefix'
-meta?.pricing.model // 'o3'  — the entry that was actually used
+meta?.pricing.model // 'gpt-4o'  — the entry that was actually used
 meta?.origin;       // 'builtin'
 ```
 
@@ -219,11 +226,13 @@ acceptable answer for every model you have not priced.
 The built-in table is hand-maintained and versioned in the source. **Nothing in this package fetches
 pricing from a provider**, and it never will without you asking.
 
-The snapshot carries a `lastUpdated` date. Older than 30 days, the package says so once at import:
+The snapshot carries a `lastUpdated` date per entry, so one model that could not be re-checked does
+not date the whole table. Older than 30 days, the package says so once at import. In the current
+snapshot that is 11 of 53 entries — the ones below that were deliberately not re-verified:
 
 ```
-[ai-costguard] 25 of 25 built-in pricing entries are older than 30 days (last checked 2026-08-23).
-Built-in pricing is a hand-maintained snapshot, not a live price feed. Verify a model against its
+[ai-costguard] 11 of 53 built-in pricing entries are older than 30 days (last checked 2026-09-30).
+Built-in pricing is a hand-maintained snapshot (2026-09-30), not a live price feed. Verify a model against its
 provider pricing page and override it when it differs.
 ```
 
@@ -233,9 +242,12 @@ its prices are old. Check it yourself at any time:
 ```ts
 import { isBuiltInPricingStale, BUILTIN_PRICING_LAST_UPDATED, listBuiltInPricing } from '@salimassili/ai-costguard';
 
-isBuiltInPricingStale();              // true when the snapshot is older than 30 days
-BUILTIN_PRICING_LAST_UPDATED;         // '2026-08-23'
+isBuiltInPricingStale();              // true when any snapshot entry is older than 30 days
+BUILTIN_PRICING_LAST_UPDATED;         // '2026-09-30' — the most recent verification pass
 listBuiltInPricing().length;          // every built-in entry
+listBuiltInPricing()
+  .filter((e) => e.lastUpdated !== BUILTIN_PRICING_LAST_UPDATED)
+  .map((e) => e.model);              // the entries that were not re-verified
 ```
 
 ```bash
@@ -244,6 +256,66 @@ npx ai-costguard pricing --check-stale   # exit 1 when stale, for a CI gate
 
 Stale pricing does not disable the guard. It means the *numbers* may be off, so verify the models you
 actually rely on and override them. A wrong price produces a wrong budget, never an uncosted call.
+
+## Which models are priced
+
+The registry is not a complete model list, and the omissions are deliberate. Two rules decide
+whether a model gets an entry.
+
+**Only a verified price becomes an entry.** A number is added only after it was read off the
+provider's own pricing page at the `source` URL recorded on the entry. Nothing is inferred from a
+similar model's rate, because for a cost guard a plausible wrong number is worse than no number.
+
+**A model whose price varies by context length is left out.** `ModelPricing` holds one price pair
+per model, so a context-tiered model cannot be represented. Adding it at the short-context rate
+would *under*-reserve budget on long-context requests, which is the unsafe direction. Those
+identifiers are intentionally unknown, so they hit the fail-closed `UNKNOWN_MODEL` block and can be
+added through `pricingOverrides` once you decide which tier you are budgeting for.
+
+That second rule is why `gpt-5.4` is absent while `gpt-5.4-mini` and `gpt-5.4-nano` are present:
+the base model is priced per context band, the two small variants are published at a single rate.
+
+### Verified in the 2026-09-30 pass
+
+| Provider | Source | Status |
+| --- | --- | --- |
+| OpenAI | <https://platform.openai.com/docs/pricing> | All OpenAI entries re-read and re-dated, and `gpt-4o` corrected from $5/$15 to $2.50/$10 per 1M tokens. Dated and completion variants that are *not* priced like their family (`gpt-4o-2024-05-13`, `gpt-4-turbo-2024-04-09`, `gpt-3.5-turbo-1106`, `gpt-3.5-turbo-instruct`) are pinned to their own rates so they cannot inherit a family price. |
+| Anthropic | <https://platform.claude.com/docs/en/about-claude/pricing> | All currently listed Claude entries re-read and re-dated. |
+
+### Not re-verified in the 2026-09-30 pass
+
+These entries keep their **original `2026-08-23` date**. That is the point: a stale date is a signal,
+and back-dating a price you did not check destroys the only mechanism the package has for telling a
+reader which numbers are trustworthy.
+
+| Entry | Why it was not re-verified |
+| --- | --- |
+| `gpt-4` | Superseded on the current page; only the `gpt-4-0613` snapshot is listed. The value retained is the well-known $30/$60, now inherited by `gpt-4-*` lookups. |
+| `claude-3-opus`, `claude-3-sonnet`, `claude-3-haiku` | The Claude 3 generation is no longer published on the pricing page. |
+| `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash` | <https://ai.google.dev/gemini-api/docs/pricing> was unreachable. The reachable Vertex AI page agrees on `gemini-2.5-pro` ($1.25/$10) and `gemini-2.5-flash` ($0.30/$2.50) but publishes **conflicting tiers** for `gemini-2.0-flash` ($0.15/$0.60 vs $0.10/$0.40), and Vertex is a different billing surface from the Gemini Developer API. |
+| `llama-3.3-70b` | <https://api.groq.com/pricing> not checked in this pass. |
+| `mistral-large` | <https://mistral.ai/pricing> not checked in this pass. |
+| `deepseek-chat` | <https://api-docs.deepseek.com/quick_start/pricing> not checked in this pass. |
+| `grok-4` | <https://docs.x.ai/docs/models> not checked in this pass. |
+
+If you depend on one of these, verify it and pin it:
+
+```ts
+import { guard, registerPricing } from '@salimassili/ai-costguard';
+
+registerPricing([
+  {
+    model: 'gemini-2.0-flash',
+    inputPer1kTokens: 0.00015,  // the rate you actually verified, in USD per 1k tokens
+    outputPer1kTokens: 0.0006,
+    lastUpdated: '2026-09-30',
+    source: 'https://ai.google.dev/gemini-api/docs/pricing',
+  },
+]);
+```
+
+Runtime entries take precedence over the built-in table for both exact and prefix matches, so
+registering the price is enough to close the gap.
 
 ## See also
 

@@ -1,5 +1,5 @@
 export { guard, guardFunction, GuardError, middleware } from './core/GuardFree.js';
-export type { GuardedClient, GuardEventControls } from './core/GuardFree.js';
+export type { GuardedClient, GuardEventControls, MiddlewareControls, MiddlewareRequest } from './core/GuardFree.js';
 export { DEFAULT_GUARDED_METHODS, createGuardState } from './core/GuardCore.js';
 export {
   BUILTIN_PRICING_LAST_UPDATED,

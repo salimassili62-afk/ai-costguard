@@ -5,6 +5,7 @@ import { appendGuardEventLog } from './event-log.js';
 import { GuardEventEmitter } from './events.js';
 import { cosineSimilarity, maxCosineSimilarity } from './similarity.js';
 import { estimateRequestTokens } from './tokenizer.js';
+import { describeScope } from './scope-fingerprint.js';
 import type {
   CostGuardAlertPayload,
   CostGuardAlertsConfig,
@@ -42,10 +43,53 @@ export const DEFAULT_GUARDED_METHODS: readonly string[] = [
   'messages.create',
 ] as const;
 
-const RETRY_TERMS = /\b(retry|retries|retrying|rerun|reran|repeat|repeated|again|reattempt|redo)\b/iu;
-const FAILURE_TERMS =
-  /\b(error|errors|errored|fail|failed|failing|failure|failures|timeout|timed out|rate limit|rate-limit|throttled|429|500|502|503|504|unavailable|exception|denied|overloaded)\b/iu;
 const ATTEMPT_TERMS = /\b(attempt|attempts|try|tries|pass|passes)\s*(?:#|no\.?|number)?\s*\d+\b/iu;
+
+/**
+ * Retry and failure vocabulary, matched one word at a time.
+ *
+ * Word-by-word rather than substring matching so "TransientError" and "Rerouted" are not hits: a
+ * compound identifier that merely contains a retry word is not a retry.
+ */
+const RETRY_SIGNAL_WORD =
+  /^(?:retry|retries|retrying|retried|rerun|reran|rerunning|reattempt|reattempted|redo|redone|repeat|repeated|repeating|again|try|tries|tried|attempt|attempts|attempted|error|errors|errored|fail|failed|failing|failure|failures|timeout|timed|throttled|exception|overloaded|429|500|502|503|504)$/iu;
+
+/**
+ * Leading tokens that mean the prompt is about a failure.
+ *
+ * A prompt that opens with one of these has the failure as its subject rather than mentioning it in
+ * passing: "Error: 429 rate limit exceeded", "Failed to reach the vector store".
+ */
+const FAILURE_LEAD_WORD =
+  /^(?:error|errors|errored|fail|failed|failing|failure|failures|timeout|timed|throttled|exception|overloaded|429|500|502|503|504)$/iu;
+
+/**
+ * Leading tokens that mean the prompt is a retry of a previous attempt.
+ *
+ * "again" and "repeat" are deliberately absent. They open ordinary continuation instructions far
+ * more often than retries ("again summarize the second option"), and treating them as retry leads
+ * blocked a session of perfectly benign prompts. They are still counted as retry vocabulary by the
+ * dominance rule below, so "again after 429" is still a retry.
+ */
+const RETRY_LEAD_WORD =
+  /^(?:retry|retries|retrying|retried|rerun|reran|rerunning|reattempt|reattempted|redo|redone|attempt|attempts|attempted)$/iu;
+
+/**
+ * Leading continuation words that only imply a retry when a failure is also present.
+ */
+const WEAK_RETRY_LEAD_WORD = /^(?:again|repeat|repeats|repeated|repeating|try|tries|tried)$/iu;
+
+/**
+ * Fraction of a prompt's words that must be retry or failure language before the prompt is treated
+ * as an actual retry.
+ *
+ * Agent retry payloads look like "Error: 429 rate limit exceeded. Retrying." where nearly every word
+ * is signal. Prose that merely discusses retries ("write tests for the retry wrapper, whose error
+ * class is TransientError") is mostly ordinary words. Requiring the prompt to be *dominated* by the
+ * vocabulary separates the two without weakening the verbatim-repeat detector, which is cosine
+ * similarity's job rather than this heuristic's.
+ */
+const RETRY_SIGNAL_DOMINANCE = 0.3;
 
 interface NormalizedBudget {
   maxUsd: number;
@@ -58,6 +102,7 @@ interface NormalizedGuardConfig {
   behaviorAnalysis: boolean;
   maxHistory: number;
   maxScopes: number;
+  scopeIdleTtlMs?: number;
   historyTtlMs: number;
   maxSteps?: number;
   loopSimilarityThreshold: number;
@@ -198,6 +243,9 @@ export class GuardCore {
     if (config.maxScopes !== undefined && (!Number.isFinite(config.maxScopes) || config.maxScopes < 1)) {
       throw configError('GuardCore maxScopes must be a finite number greater than 0');
     }
+    if (config.scopeIdleTtlMs !== undefined && (!Number.isFinite(config.scopeIdleTtlMs) || config.scopeIdleTtlMs <= 0)) {
+      throw configError('GuardCore scopeIdleTtlMs must be a finite number greater than 0');
+    }
     if (config.historyTtlMs !== undefined && (!Number.isFinite(config.historyTtlMs) || config.historyTtlMs < 0)) {
       throw configError('GuardCore historyTtlMs must be a finite number greater than or equal to 0');
     }
@@ -239,6 +287,7 @@ export class GuardCore {
       behaviorAnalysis: config.behaviorAnalysis ?? true,
       maxHistory: config.maxHistory ?? DEFAULT_MAX_HISTORY,
       maxScopes: Math.trunc(config.maxScopes ?? DEFAULT_MAX_SCOPES),
+      scopeIdleTtlMs: config.scopeIdleTtlMs,
       historyTtlMs: Math.max(0, config.historyTtlMs ?? DEFAULT_HISTORY_TTL_MS),
       maxSteps: config.maxSteps,
       loopSimilarityThreshold,
@@ -313,8 +362,8 @@ export class GuardCore {
     const scope = this.extractScope(record);
     const scopeKey = createScopeKey(scope);
     const tokenEstimate = estimateRequestTokens(record);
-    const outputTokens = tokenEstimate.outputTokens ?? this.config.defaultOutputTokens;
-    if (outputTokens === undefined) {
+    const outputTokensPerCandidate = tokenEstimate.outputTokensPerCandidate ?? this.config.defaultOutputTokens;
+    if (outputTokensPerCandidate === undefined) {
       throw new GuardError(
         'A finite output token limit is required for safe pre-call estimation. ' +
           'Pass one of max_tokens / max_completion_tokens / max_output_tokens in the request, ' +
@@ -322,6 +371,17 @@ export class GuardCore {
         undefined,
         'OUTPUT_LIMIT_REQUIRED'
       );
+    }
+    // The estimator owns the costed surface, including both batch multipliers. Recomputing the
+    // output total here is what previously let the two drift apart: the estimator multiplied by
+    // promptCount for input tokens, and this method multiplied by candidateCount for output, so a
+    // request that batched prompts *and* asked for n>1 completions was reserved at a fraction of
+    // what the provider bills.
+    const outputTokens =
+      tokenEstimate.outputTokens ??
+      outputTokensPerCandidate * tokenEstimate.candidateCount * tokenEstimate.promptCount;
+    if (!Number.isFinite(outputTokens)) {
+      throw new GuardError('Reserved output tokens for this request are not finite.', undefined, 'CONTEXT_INVALID');
     }
     if (tokenEstimate.approximate) {
       this.warnApproximateTokens(model, scopeKey);
@@ -337,8 +397,10 @@ export class GuardCore {
         inputTokens: tokenEstimate.inputTokens,
         approximateTokens: tokenEstimate.approximate,
         outputTokens,
-        outputTokensSource: tokenEstimate.outputTokens === undefined ? 'default' : 'request',
-        mediaTokens: tokenEstimate.mediaTokens,
+      outputTokensSource: tokenEstimate.outputTokensPerCandidate === undefined ? 'default' : 'request',
+      candidateCount: tokenEstimate.candidateCount,
+      promptCount: tokenEstimate.promptCount,
+      mediaTokens: tokenEstimate.mediaTokens,
         schemaTokens: tokenEstimate.schemaTokens,
         hasMediaInput: tokenEstimate.hasMediaInput,
         hasSchemaInput: tokenEstimate.hasSchemaInput,
@@ -370,7 +432,9 @@ export class GuardCore {
       inputTokens: tokenEstimate.inputTokens,
       approximateTokens: tokenEstimate.approximate,
       outputTokens,
-      outputTokensSource: tokenEstimate.outputTokens === undefined ? 'default' : 'request',
+      outputTokensSource: tokenEstimate.outputTokensPerCandidate === undefined ? 'default' : 'request',
+        candidateCount: tokenEstimate.candidateCount,
+        promptCount: tokenEstimate.promptCount,
       mediaTokens: tokenEstimate.mediaTokens,
       schemaTokens: tokenEstimate.schemaTokens,
       hasMediaInput: tokenEstimate.hasMediaInput,
@@ -409,7 +473,14 @@ export class GuardCore {
   check(context: RequestContext): GuardCheckResult {
     normalizeRequestContext(context);
     const scope = this.getScopeState(context);
-    this.pruneScope(scope, Date.now());
+    const now = Date.now();
+    this.pruneScope(scope, now);
+    // Marked active for every request that reaches the scope, not only the ones that commit a
+    // reservation. A session whose requests are all being blocked is still an active session: if
+    // its idle clock only advanced on success, scopeIdleTtlMs would reclaim it mid-conversation
+    // and hand the same user a fresh budget the moment they started being blocked again, which
+    // turns a budget guard into an unlimited one.
+    scope.lastRequestTime = now;
     this.recordAttempt(scope, context);
 
     // --- critical section: no user code, no await, no I/O below this line until commit ---
@@ -541,12 +612,19 @@ export class GuardCore {
   }
 
   private checkBudget(scope: GuardScopeState, context: RequestContext): string | undefined {
-    // Compared on the same micro-cent scale that reservedCost is stored on, so an estimate that
-    // lands exactly on the remaining budget is allowed and a float artefact never blocks a call.
+    // Both sides of the comparison are converted to exact integer micro-dollars before they are
+    // compared. `projected` is already on that scale because `addMoney` rounds, but `this.budget` is
+    // whatever the caller passed, and a budget derived by float arithmetic is not: a caller computing
+    // `budget = 2 * 0.007509999999999999` gets 0.015019999999999998, while two accumulated charges
+    // of 0.00751 sum to exactly 0.01502. Comparing those two floats directly blocks a call that lands
+    // precisely on its budget, which is the opposite of the intent. Rounding the budget to the same
+    // scale before comparing makes an exactly-at-budget charge allowed, matches the integer
+    // micro-dollar rule the shared Redis path enforces, and means a float artefact can never decide a
+    // block on its own.
     const projected = addMoney(scope.reservedCost, context.estimatedCost);
-    if (projected <= this.config.budget) return undefined;
+    if (toMicros(projected) <= toMicros(this.config.budget)) return undefined;
     return (
-      `Budget exceeded for scope ${context.scopeKey ?? 'default'}: ` +
+      `Budget exceeded for ${describeScope(context.scopeKey)}: ` +
       `reserved $${scope.reservedCost.toFixed(6)} + estimated $${context.estimatedCost.toFixed(6)} ` +
       `= $${projected.toFixed(6)} exceeds budget $${this.config.budget.toFixed(6)} ` +
       `(remaining $${Math.max(0, roundMoney(this.config.budget - scope.reservedCost)).toFixed(6)})`
@@ -673,35 +751,93 @@ export class GuardCore {
     }
 
     if (Object.keys(this.state.scopes).length >= this.config.maxScopes) {
-      // No scope exists for this request, so only the process-wide aggregate is updated.
-      // Failing closed here is deliberate: silently evicting a scope would hand a caller a fresh
-      // budget for a project that already spent its allowance.
-      this.state.attemptedCost = addMoney(this.state.attemptedCost, context.estimatedCost);
-      this.recordBlock(undefined, context);
-      this.emit('cost', context);
+      // Only ever reached when a genuinely new scope arrives at a full map. This is off the hot
+      // path, so the opt-in sweep below costs nothing for a healthy process.
+      this.reclaimIdleScopes(Date.now());
 
-      const limitReached = new GuardError(
-        `Maximum process-local scope count exceeded: ${this.config.maxScopes}. ` +
-          'Raise maxScopes, shorten scope identifier lifetimes, or reset the process. ' +
-          'Existing scope budgets are never evicted to make room.',
-        context,
-        'SCOPE_LIMIT_EXCEEDED',
-        {
-          scopeKey,
-          model: context.model,
-          estimatedCostUsd: safeMoney(context.estimatedCost),
-          budgetLimitUsd: this.config.budget,
-          reservedCostUsd: 0,
-          remainingUsd: this.config.budget,
-        }
-      );
-      this.emit('block', context, limitReached.message, 'SCOPE_LIMIT_EXCEEDED');
-      throw limitReached;
+      if (Object.keys(this.state.scopes).length >= this.config.maxScopes) {
+        // No scope exists for this request, so only the process-wide aggregate is updated.
+        // Failing closed here is deliberate: silently evicting a scope would hand a caller a fresh
+        // budget for a project that already spent its allowance.
+        this.state.attemptedCost = addMoney(this.state.attemptedCost, context.estimatedCost);
+        this.recordBlock(undefined, context);
+        this.emit('cost', context);
+
+        const limitReached = new GuardError(
+          `Maximum process-local scope count exceeded: ${this.config.maxScopes}. ` +
+            'Raise maxScopes, shorten scope identifier lifetimes, or reset the process. ' +
+            'Existing scope budgets are never evicted to make room.',
+          context,
+          'SCOPE_LIMIT_EXCEEDED',
+          {
+            scopeKey,
+            model: context.model,
+            estimatedCostUsd: safeMoney(context.estimatedCost),
+            budgetLimitUsd: this.config.budget,
+            reservedCostUsd: 0,
+            remainingUsd: this.config.budget,
+          }
+        );
+        this.emit('block', context, limitReached.message, 'SCOPE_LIMIT_EXCEEDED');
+        throw limitReached;
+      }
     }
 
     const fresh = createScopeState();
+    fresh.reclaimable = isReclaimableScope(context.scope);
     defineOwnScope(this.state.scopes, scopeKey, fresh);
     return fresh;
+  }
+
+  /**
+   * Drops idle session/run scopes so a long-lived process cannot wedge itself at `maxScopes`.
+   *
+   * Opt-in through `scopeIdleTtlMs`, and deliberately narrow:
+   *
+   * - Only scopes identified by `sessionId` or `runId` are eligible. A `projectId` or `userId`
+   *   scope is a long-lived identity whose budget must survive for as long as the process does,
+   *   and the implicit `default` scope holds the process-wide aggregate view.
+   * - Only scopes idle for longer than the TTL are eligible, so an active session is never touched.
+   * - The process-wide aggregate counters are never reset.
+   *
+   * Spend bound, stated precisely. Reclaiming a scope deletes that scope's accumulated spend, so
+   * the next request under the reclaimed key starts a fresh per-scope budget. The process-wide
+   * counters keep recording the money, but they are *reporting only*: `checkBudget` reads the
+   * per-scope state and never consults the aggregate, so there is no process-wide spend cap to
+   * backstop this. Two consequences follow, and both are properties of the caller's scope
+   * identifiers rather than of the TTL:
+   *
+   * - A fixed population of scope identifiers that recycles among itself cannot spend more than
+   *   `budget` per identifier per TTL window, because an identifier must be idle for the full TTL
+   *   between reclamations. This is the case the TTL is designed for.
+   * - A caller that continually introduces *new* scope identifiers can exceed `budget` in total
+   *   without bound, because every newly arriving scope at a full map triggers another sweep and
+   *   can reclaim up to `maxScopes` idle scopes. Each reclamation is worth up to one further
+   *   `budget` of spend.
+   *
+   * The guard is therefore enforcing a per-scope budget, not a per-process one. Callers that need a
+   * hard process-wide ceiling must either scope by `projectId`/`userId` (never reclaimed), or run
+   * the shared-budget `GuardPro` path, where the total is held in Redis and reclamation cannot apply.
+   */
+  private reclaimIdleScopes(now: number): void {
+    const ttl = this.config.scopeIdleTtlMs;
+    const scopes = this.state.scopes;
+    if (ttl === undefined || !scopes) return;
+
+    const idleBefore = now - ttl;
+    let reclaimed = 0;
+
+    for (const [scopeKey, scope] of Object.entries(scopes)) {
+      if (scope?.reclaimable !== true) continue;
+      if (scope.lastRequestTime > idleBefore) continue;
+      if (Reflect.deleteProperty(scopes, scopeKey)) {
+        reclaimed += 1;
+      }
+    }
+
+    if (reclaimed > 0) {
+      this.state.reclaimedScopeCount = (this.state.reclaimedScopeCount ?? 0) + reclaimed;
+    }
   }
 
   /**
@@ -863,7 +999,21 @@ function createScopeState(): GuardScopeState {
     blockedCount: 0,
     recentPrompts: [],
     recentRetries: [],
+    reclaimable: false,
   };
+}
+
+/**
+ * True when a scope identity is short-lived enough to be reclaimed once it goes idle.
+ *
+ * Only `sessionId` and `runId` qualify. A `projectId` or `userId` scope is a durable identity
+ * whose accumulated spend has to keep blocking, and the implicit default scope carries the
+ * process-wide view.
+ */
+function isReclaimableScope(scope: GuardScope | undefined): boolean {
+  if (!scope) return false;
+  if (scope.projectId || scope.userId) return false;
+  return Boolean(scope.sessionId || scope.runId);
 }
 
 const EMPTY_STATE_SNAPSHOT: Readonly<GuardState> = Object.freeze({
@@ -886,6 +1036,12 @@ function safeMoney(value: unknown): number {
   return value;
 }
 
+/**
+ * Returns a short, stable, non-reversible label for a scope key.
+ *
+ * `GuardError.metadata.scopeKey` still carries the raw key for the caller that threw it, which owns
+ * those values already.
+ */
 function hydrateScopeState(state: GuardScopeState): void {
   state.requestCount ??= 0;
   state.reservedCost ??= state.totalCost ?? 0;
@@ -897,6 +1053,7 @@ function hydrateScopeState(state: GuardScopeState): void {
   state.blockedCount ??= 0;
   state.recentPrompts ??= [];
   state.recentRetries ??= [];
+  state.reclaimable ??= false;
 }
 
 function normalizeBudget(configBudget: GuardConfig['budget']): NormalizedBudget {
@@ -1079,13 +1236,49 @@ function normalizeScope(scope: GuardScope | undefined): GuardScope | undefined {
 /**
  * Heuristic retry signal.
  *
- * A prompt only counts toward retry-storm detection when it carries a retry term AND either a
- * failure term or an explicit attempt counter. Requiring both sides deliberately under-detects
- * prompts that merely discuss retrying, because "retry" alone is ordinary instruction text.
+ * A prompt counts toward retry-storm detection when it carries an explicit attempt counter, when it
+ * *opens* with retry or failure language, or when that language dominates it.
+ *
+ * The previous rule accepted any prompt containing a retry word and a failure word *anywhere*, so a
+ * session that happened to discuss retries three times was blocked with RETRY_STORM_DETECTED even
+ * though nothing was being retried: three unrelated documentation questions about a retry wrapper
+ * tripped the guard. Both new signals key on the retry being the *subject* of the prompt rather than
+ * an aside in it, which is how an agent retry payload actually reads.
+ *
+ * Under-detecting here is the safe direction. A genuine storm is still caught, because repeated
+ * attempts either match these signals or are near-identical, and near-identical prompts are what
+ * `LOOP_DETECTED` catches by cosine similarity.
  */
 function hasRetrySignal(prompt: string): boolean {
-  if (!RETRY_TERMS.test(prompt)) return false;
-  return FAILURE_TERMS.test(prompt) || ATTEMPT_TERMS.test(prompt);
+  const trimmed = prompt.trim();
+  if (!trimmed) return false;
+
+  // "attempt 2" is a retry marker by construction, wherever it appears.
+  if (ATTEMPT_TERMS.test(trimmed)) return true;
+
+  const words = trimmed.split(/\s+/u);
+  const lead = stripSurroundingPunctuation(words[0]!);
+
+  if (FAILURE_LEAD_WORD.test(lead) || RETRY_LEAD_WORD.test(lead)) return true;
+
+  // A continuation lead only means a retry when the prompt also reports a failure, which keeps
+  // "again summarize the second option" out of the retry history.
+  if (WEAK_RETRY_LEAD_WORD.test(lead) && words.some((word) => FAILURE_LEAD_WORD.test(stripSurroundingPunctuation(word)))) {
+    return true;
+  }
+
+  // "Please try again, the call failed" leads with a courtesy word instead.
+  let signalWords = 0;
+  for (const word of words) {
+    if (RETRY_SIGNAL_WORD.test(stripSurroundingPunctuation(word))) signalWords += 1;
+  }
+
+  return signalWords / words.length >= RETRY_SIGNAL_DOMINANCE;
+}
+
+/** Removes leading and trailing punctuation so "Error:" and "failed." match the word patterns. */
+function stripSurroundingPunctuation(word: string): string {
+  return word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
 }
 
 /**
@@ -1201,6 +1394,19 @@ function sanitizeCount(value: unknown): number {
  */
 function roundMoney(value: number): number {
   return Math.round(sanitizeMoney(value) * 1_000_000) / 1_000_000;
+}
+
+/**
+ * Converts a USD amount to exact integer micro-dollars for boundary comparisons.
+ *
+ * `roundMoney` is used for storage and for reporting, where a readable decimal is what a caller and a
+ * block reason both want. Enforcement needs something stricter: two values that round to the same
+ * 6-decimal figure must compare as equal, and the only way to guarantee that is to compare the
+ * integers both sides quantize to. This is the same rule the shared Redis spend script applies, so
+ * the in-process path and the shared path agree on an exactly-at-budget charge.
+ */
+function toMicros(value: number): number {
+  return Math.round(sanitizeMoney(value) * 1_000_000);
 }
 
 /**

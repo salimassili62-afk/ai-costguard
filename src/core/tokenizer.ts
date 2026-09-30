@@ -64,9 +64,15 @@ interface TokenEstimate {
  * Token estimate for one AI request, with an auditable costed surface.
  */
 export interface RequestTokenEstimate {
-  /** Estimated billable input tokens, including schemas, system prompts, and media parts. */
+  /** Estimated billable input tokens, including schemas, system prompts, media, and prompt replication. */
   inputTokens: number;
-  /** Requested or reserved output tokens. Undefined when the request sets no output limit. */
+  /** Output limit requested for a single completion. Undefined when the request sets no output limit. */
+  outputTokensPerCandidate?: number;
+  /** Number of separately billed completions the request asks for. At least 1. */
+  candidateCount: number;
+  /** Number of separately billed prompts. At least 1; greater than 1 only for legacy prompt arrays. */
+  promptCount: number;
+  /** Total billable output tokens across every candidate and every prompt. Undefined when the request sets no output limit. */
   outputTokens?: number;
   /** Sum of inputTokens and outputTokens. */
   tokens: number;
@@ -147,17 +153,32 @@ export function estimateRequestTokens(params: unknown): RequestTokenEstimate {
   const textSurface = joinSurfaces(prompt, instructionText, schemaText);
   const textEstimate = estimateTokensForModel(model, textSurface);
   const schemaTokens = schemaText ? estimateTokensForModel(model, schemaText).tokens : 0;
-  const inputTokens = textEstimate.tokens + messageOverhead + media.tokens;
 
-  const outputTokens =
+  // Providers bill every candidate and every prompt in a batch, so the reservation has to cover
+  // the whole request rather than one completion.
+  const candidateCount = readCandidateCount(record);
+  const promptCount = readPromptCount(record);
+  const inputTokens = (textEstimate.tokens + messageOverhead + media.tokens) * promptCount;
+
+  const outputTokensPerCandidate =
     readPositiveNumber(record.max_tokens) ??
     readPositiveNumber(record.max_completion_tokens) ??
     readPositiveNumber(record.maxTokens) ??
     readPositiveNumber(record.max_output_tokens) ??
     readPositiveNumber(record.maxOutputTokens);
 
+  // The two multipliers are independent, not alternatives. The legacy Completions API accepts both
+  // `prompt: [...]` and `n` on the same request and returns `n` completions for each prompt, so the
+  // billed output is maxTokens * candidates * prompts. Multiplying by candidates alone under-
+  // reserved by a factor of promptCount for exactly the batched requests that cost the most.
+  const outputTokens =
+    outputTokensPerCandidate === undefined ? undefined : outputTokensPerCandidate * candidateCount * promptCount;
+
   return {
     inputTokens,
+    outputTokensPerCandidate,
+    candidateCount,
+    promptCount,
     outputTokens,
     tokens: inputTokens + (outputTokens ?? 0),
     prompt,
@@ -167,6 +188,34 @@ export function estimateRequestTokens(params: unknown): RequestTokenEstimate {
     hasMediaInput: media.parts > 0,
     hasSchemaInput: schemaText.length > 0,
   };
+}
+
+/**
+ * Reads how many separately billed completions a request asks for.
+ *
+ * `n` is the OpenAI Chat/Completions choice count. Anthropic always returns one completion.
+ * Legacy `best_of` is deliberately ignored: only the best sequence is billed.
+ */
+function readCandidateCount(record: Record<string, unknown>): number {
+  const requested =
+    readPositiveNumber(record.n) ??
+    readPositiveNumber(record.numChoices) ??
+    readPositiveNumber(record.num_choices) ??
+    readPositiveNumber(record.numberOfCompletions);
+
+  if (requested === undefined) return 1;
+  return Math.max(1, Math.min(1_000, Math.ceil(requested)));
+}
+
+/**
+ * Reads how many separately billed prompts a request carries.
+ *
+ * The legacy Completions API accepts an array of prompts and bills each one. `messages` and the
+ * Responses API `input` array are a single conversation and are never multiplied.
+ */
+function readPromptCount(record: Record<string, unknown>): number {
+  if (!Array.isArray(record.prompt) || record.prompt.length === 0) return 1;
+  return Math.min(1_000, record.prompt.length);
 }
 
 /**

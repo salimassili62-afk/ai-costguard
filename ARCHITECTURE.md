@@ -82,7 +82,10 @@ Scopes isolate budget and behavior history. A scope can include:
 - `userId`
 - `sessionId`
 
-If no scope is configured, all calls use the `default` scope. Prompt and retry histories are pruned by `historyTtlMs`. Scope keys use structured serialization rather than delimiters. Identifiers are bounded to 256 characters and new process-local scopes are blocked after `maxScopes` (default 10,000) so budget state is never silently evicted.
+If no scope is configured, all calls use the `default` scope. Prompt and retry histories are pruned by `historyTtlMs`. Scope keys use structured serialization rather than delimiters. Identifiers are bounded to 256 characters and new process-local scopes are blocked after `maxScopes` (default 10,000) so budget state is never silently evicted. The opt-in `scopeIdleTtlMs` reclaims scopes identified purely by `sessionId`/`runId` once they have been idle that long, but only when a new scope arrives at a full map; `projectId`/`userId` scopes, the default scope, and the process-wide counters are never reclaimed.
+
+`budget` is enforced **per scope**, never per process. The process-wide counters exist for reporting and are never consulted when deciding to block, so reclamation is what makes an unbounded identifier space possible at all: a caller that keeps minting new `sessionId`/`runId` values can spend more than `budget` in total, because each new scope arriving at a full map can trigger a sweep that reclaims up to `maxScopes` idle scopes. A *fixed* set of identifiers that recycles among itself is bounded to `budget` per identifier per TTL window. Callers that need a hard process-wide ceiling must scope by `projectId`/`userId` (never reclaimed) or use the shared-budget path, where the total lives in Redis and idle reclamation cannot apply. See
+[docs/SHARED-BUDGET.md](docs/SHARED-BUDGET.md).
 
 ## Accounting Model
 

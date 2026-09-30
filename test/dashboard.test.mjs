@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { guard, registerTokenizer } from '../dist/esm/index.js';
-import { formatDashboardSummary, startDashboardServer, summarizeDashboard } from '../dist/esm/dashboard.js';
+import { formatDashboardSummary, readDashboardEvents, startDashboardServer, summarizeDashboard } from '../dist/esm/dashboard.js';
 import { daysAgo } from './helpers/dates.mjs';
 
 test('dashboard summary ignores malformed lines and aggregates metrics', () => {
@@ -198,4 +198,100 @@ test('dashboard summary includes actual provider usage recorded after allow even
   assert.equal(summary.requestsBlocked, 0);
   assert.equal(summary.actualSpendUsd, 0.03);
   assert.equal(summary.recentEvents.some((event) => event.type === 'usage' && event.actualCost === 0.03), true);
+});
+
+test('the JSON summary route matches exactly and ignores the query string', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'costguard-dashboard-route-'));
+  const eventLogPath = join(directory, 'events.jsonl');
+  writeFileSync(eventLogPath, '', 'utf8');
+
+  const { server, url } = await startDashboardServer({ eventLogPath, port: 0 });
+
+  try {
+    const summary = await fetch(`${url}/events.json`);
+    assert.equal(summary.status, 200);
+    assert.match(summary.headers.get('content-type'), /application\/json/u);
+
+    const queried = await fetch(`${url}/events.json?since=2026-01-01`);
+    assert.equal(queried.status, 200);
+    assert.match(queried.headers.get('content-type'), /application\/json/u);
+
+    // A prefix match answered these with the raw summary.
+    for (const path of ['/events.jsonl', '/events.json.bak', '/events.jsonfoo']) {
+      const response = await fetch(`${url}${path}`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get('content-type'), /text\/html/u, `${path} must render the dashboard, not the summary`);
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('the dashboard reuses its parse while the log is unchanged and refreshes on append', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'costguard-dashboard-cache-'));
+  const eventLogPath = join(directory, 'events.jsonl');
+  const record = (cost) =>
+    JSON.stringify({
+      version: 1,
+      timestamp: '2026-06-08T00:00:00.000Z',
+      type: 'allow',
+      model: 'gpt-4o-mini',
+      scopeKey: 'default',
+      estimatedCost: cost,
+      tokens: 100,
+    }) + '\n';
+
+  writeFileSync(eventLogPath, record(0.001), 'utf8');
+
+  const first = summarizeDashboard({ eventLogPath });
+  assert.equal(first.requestsAllowed, 1);
+
+  // An append changes the file, so the next poll must see it rather than a cached parse.
+  writeFileSync(eventLogPath, record(0.001) + record(0.002), 'utf8');
+  const second = summarizeDashboard({ eventLogPath });
+  assert.equal(second.requestsAllowed, 2, 'a rewritten log must be re-read');
+
+  // Two summaries of the same unchanged file are equal, and the caller cannot poison the cache.
+  const copy = readDashboardEvents(eventLogPath);
+  copy.length = 0;
+  assert.equal(summarizeDashboard({ eventLogPath }).requestsAllowed, 2, 'a mutated result must not be cached');
+
+  // A different file must not be served from the first file's cache entry.
+  const otherLog = join(directory, 'other.jsonl');
+  writeFileSync(otherLog, record(0.001) + record(0.002) + record(0.003), 'utf8');
+  assert.equal(summarizeDashboard({ eventLogPath: otherLog }).requestsAllowed, 3);
+  assert.equal(summarizeDashboard({ eventLogPath }).requestsAllowed, 2, 'switching back re-reads rather than reusing');
+
+  // Polling must not re-parse an unchanged log. This is the whole point of the cache: the dashboard
+  // is polled, and re-parsing the file on the request path blocks the guarded application's event
+  // loop once the log is large. JSON.parse is the observable here, so the check is not a timing race.
+  const lines = [];
+  for (let index = 0; index < 500; index += 1) lines.push(record(0.0001));
+  const polledLog = join(directory, 'polled.jsonl');
+  writeFileSync(polledLog, lines.join(''), 'utf8');
+
+  const originalParse = JSON.parse;
+  let parses = 0;
+  JSON.parse = (...args) => {
+    parses += 1;
+    return originalParse(...args);
+  };
+
+  try {
+    parses = 0;
+    summarizeDashboard({ eventLogPath: polledLog });
+    assert.equal(parses, 500, 'the first poll parses every record');
+
+    parses = 0;
+    for (let poll = 0; poll < 5; poll += 1) summarizeDashboard({ eventLogPath: polledLog });
+    assert.equal(parses, 0, 'an unchanged log must not be re-parsed on every poll');
+
+    appendFileSync(polledLog, record(0.0001), 'utf8');
+    parses = 0;
+    const afterAppend = summarizeDashboard({ eventLogPath: polledLog });
+    assert.equal(afterAppend.requestsAllowed, 501, 'an appended record must show up');
+    assert.equal(parses, 501, 'an appended log is parsed again');
+  } finally {
+    JSON.parse = originalParse;
+  }
 });

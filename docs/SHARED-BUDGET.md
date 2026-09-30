@@ -67,6 +67,30 @@ await pro.checkAndCharge('tenant-abc', 0.0042);
 `checkAndCharge()` throws `GuardError` with code `BUDGET_EXCEEDED` when the request would exceed the
 project budget. Each `projectId` gets its own key, so tenants are isolated by construction.
 
+### Exact six-decimal accounting
+
+The script compares **integer micro-dollars**, not floats, so the budget boundary is exact. A charge
+that lands precisely on the budget is allowed:
+
+```ts
+const pro = new GuardPro({ redisUrl, budget: 0.3 });
+await pro.checkAndCharge('tenant-abc', 0.2);
+await pro.checkAndCharge('tenant-abc', 0.1); // allowed: total is exactly $0.30
+```
+
+Redis float arithmetic would reject that second call, because `0.2 + 0.1` evaluates to
+`0.30000000000000004`. Amounts are rounded to six decimal places to match the in-process
+`GuardCore` ledger, so shared and local accounting agree at the boundary.
+
+The stored value stays a human-readable decimal string (`"0.3"`) rather than an opaque integer, so
+existing keys keep working. Spend written by earlier releases, including float-drifted values such as
+`0.30000000000000004`, is normalized on the next charge. An unreadable or out-of-range value fails
+closed with `SHARED_BUDGET_UNAVAILABLE` instead of silently resetting a tenant's spend to zero.
+
+The exact script is executed against a real Lua interpreter in `test/guard-pro-lua.test.mjs`, which
+checks the boundary, drift across thousands of micro-dollar charges, legacy values, and TTL
+behavior. Set `COSTGUARD_REDIS_URL` to also run the same assertions against a live Redis.
+
 `GuardPro` lives at `@salimassili/ai-costguard/pro`. It is MIT-licensed, ships in the same npm
 package, and has **no license check, no activation, and no network call to any vendor**. There is no
 paid tier and no second runtime to install.

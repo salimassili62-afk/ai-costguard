@@ -9,35 +9,127 @@ import type {
 } from './types.js';
 import { notifyBlockWebhooks } from './webhooks.js';
 
+const MONEY_SCALE = 1_000_000;
+
+/**
+ * Atomic shared-spend decision script.
+ *
+ * All comparisons run on integer micro-dollars so the boundary is exact: Redis
+ * float arithmetic would reject an exactly-at-budget charge such as
+ * `0.2 + 0.1 > 0.3` because `0.2 + 0.1` evaluates to `0.30000000000000004`.
+ *
+ * ARGV[1] charge amount in micro-dollars, ARGV[2] window TTL in seconds,
+ * ARGV[3] budget in micro-dollars. Returns {allowed, currentUsd, projectedUsd}
+ * as decimal dollar strings, so the stored representation stays human readable
+ * and backwards compatible with values written by earlier releases.
+ */
+const SPEND_DECISION_SCRIPT = `
+  local SCALE = 1000000
+
+  local function toUsd(micros)
+    local sign = ""
+    if micros < 0 then
+      sign = "-"
+      micros = -micros
+    end
+    local whole = math.floor(micros / SCALE)
+    local fraction = micros - whole * SCALE
+    local text = string.format("%06.0f", fraction)
+    text = (string.gsub(text, "0+$", ""))
+    if text == "" then
+      return sign .. string.format("%.0f", whole)
+    end
+    return sign .. string.format("%.0f", whole) .. "." .. text
+  end
+
+  local function toMicros(value)
+    local micros = math.floor(value * SCALE + 0.5)
+    if micros > 9007199254740991 then
+      return nil
+    end
+    return micros
+  end
+
+  local currentRaw = redis.call("GET", KEYS[1])
+  local current = 0
+  if currentRaw then
+    local currentNumber = tonumber(currentRaw)
+    if not currentNumber or currentNumber < 0 then
+      return redis.error_reply("ai-costguard: unreadable spend value")
+    end
+    current = toMicros(currentNumber)
+    if not current then
+      return redis.error_reply("ai-costguard: spend value out of range")
+    end
+  end
+
+  local amount = tonumber(ARGV[1])
+  local budget = tonumber(ARGV[3])
+  if not amount or not budget then
+    return redis.error_reply("ai-costguard: invalid charge arguments")
+  end
+
+  local projected = current + amount
+  if projected > budget then
+    return {0, toUsd(current), toUsd(projected)}
+  end
+
+  local ttl = redis.call("TTL", KEYS[1])
+  redis.call("SET", KEYS[1], toUsd(projected))
+  if ttl >= 1 then
+    redis.call("EXPIRE", KEYS[1], ttl)
+  else
+    redis.call("EXPIRE", KEYS[1], ARGV[2])
+  end
+  return {1, toUsd(projected), toUsd(projected)}
+`;
+
+/**
+ * How long a failed Redis connection is left alone before another attempt is made.
+ *
+ * Without a cooldown, every guarded request during an outage starts its own TCP connect, so the
+ * guard amplifies the incident it is supposed to survive. Requests inside the window fail closed
+ * immediately instead of paying for a connection attempt.
+ */
+const DEFAULT_RECONNECT_COOLDOWN_MS = 1_000;
+
 function createLazyRedisClient(redisUrl: string): GuardProRedisClient {
   let client: GuardProRedisClient | null = null;
+  let pending: Promise<GuardProRedisClient> | null = null;
   const queuedListeners: Array<['ready' | 'error' | 'close', () => void]> = [];
 
-  async function loadClient(): Promise<GuardProRedisClient> {
-    if (client) {
+  // The in-flight promise is cached so concurrent callers share one import and one socket.
+  // Without it, two simultaneous guarded calls both observe `client === null` and each build a
+  // separate connection, leaking one of them for the life of the process.
+  function loadClient(): Promise<GuardProRedisClient> {
+    if (client) return Promise.resolve(client);
+    pending ??= (async () => {
+      const imported = await import('ioredis').catch(() => {
+        throw new Error(
+          '[ai-costguard] Shared budget enforcement via Redis requires the optional ioredis peer. ' +
+            'Run: npm install ioredis'
+        );
+      });
+
+      const Redis = (imported as any).default ?? imported;
+      const redis = new Redis(redisUrl, {
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        retryStrategy: () => null,
+      });
+
+      for (const [eventName, handler] of queuedListeners) {
+        redis.on?.(eventName, handler);
+      }
+      queuedListeners.length = 0;
+
+      client = redis as GuardProRedisClient;
       return client;
-    }
-
-    const imported = await import('ioredis').catch(() => {
-      throw new Error(
-        '[ai-costguard] Shared budget enforcement via Redis requires the optional ioredis peer. ' +
-          'Run: npm install ioredis'
-      );
+    })().finally(() => {
+      pending = null;
     });
 
-    const Redis = (imported as any).default ?? imported;
-    const redis = new Redis(redisUrl, {
-      lazyConnect: true,
-      enableOfflineQueue: false,
-      retryStrategy: () => null,
-    });
-
-    for (const [eventName, handler] of queuedListeners) {
-      redis.on?.(eventName, handler);
-    }
-
-    client = redis;
-    return client as GuardProRedisClient;
+    return pending;
   }
 
   return {
@@ -93,7 +185,13 @@ export interface GuardProRedisClient {
   on?(eventName: 'ready' | 'error' | 'close', handler: () => void): unknown;
   /** Opens the Redis connection when the client is lazy. */
   connect?(): Promise<unknown>;
-  /** Evaluates the atomic spend decision Lua script. */
+  /**
+   * Evaluates the atomic spend decision Lua script.
+   *
+   * `amount` and `budget` are integer micro-dollar strings and the resolved
+   * decision must be a `{ allowed, currentUsd, projectedUsd }` tuple of decimal
+   * dollar strings. Custom clients must replicate the bundled script semantics.
+   */
   eval(script: string, keys: number, key: string, amount: string, ttlSeconds: string, budget: string): Promise<unknown>;
   /** Reads the current spend value. */
   get(key: string): Promise<string | null>;
@@ -113,6 +211,14 @@ export interface GuardProConfig {
   budget: number | GuardBudgetConfig;
   /** Session TTL in seconds. Defaults to 86400. */
   windowSeconds?: number;
+  /**
+   * How long a failed Redis connection is left alone before another attempt is made, in
+   * milliseconds. Defaults to 1000.
+   *
+   * Inside the window every call fails closed with `SHARED_BUDGET_UNAVAILABLE` without opening a
+   * connection, so a Redis outage cannot be amplified into a connect storm by guarded traffic.
+   */
+  reconnectCooldownMs?: number;
   /** Default project identifier used in alert payloads when checkAndCharge supplies a project key. */
   projectId?: string;
   /** Agent run identifier used in alert payloads. */
@@ -129,6 +235,9 @@ export interface GuardProConfig {
   allowLocalFallback?: boolean;
   /** Optional Redis-compatible client. When omitted, GuardPro pools ioredis clients by URL. */
   redisClient?: GuardProRedisClient;
+  // The caller owns an injected client: GuardPro connects it lazily and never closes it, because the
+  // same client may be shared with other guards. Only pooled clients created from redisUrl are
+  // closed by shutdown().
 }
 
 interface LocalSpendRecord {
@@ -141,6 +250,7 @@ interface RedisPoolEntry {
   refs: number;
   connected: boolean;
   connectPromise?: Promise<GuardProRedisClient | null>;
+  retryAfter: number;
 }
 
 /**
@@ -160,10 +270,13 @@ export class GuardPro {
   private readonly alerts?: CostGuardAlertsConfig;
   private readonly webhooks?: GuardWebhookConfig;
   private readonly allowLocalFallback: boolean;
+  private readonly reconnectCooldownMs: number;
   private readonly localSpend = new Map<string, LocalSpendRecord>();
   private readonly thresholdAlertedKeys = new Set<string>();
   private directRedisFailed = false;
   private directRedisReady = false;
+  private directConnectPromise?: Promise<GuardProRedisClient | null>;
+  private retryAfter = 0;
 
   /**
    * Creates a GuardPro instance and reuses a pooled Redis connection for the same URL.
@@ -186,10 +299,16 @@ export class GuardPro {
       );
     }
 
+    const reconnectCooldownMs = config.reconnectCooldownMs ?? DEFAULT_RECONNECT_COOLDOWN_MS;
+    if (!Number.isFinite(reconnectCooldownMs) || reconnectCooldownMs < 0) {
+      throw proConfigError('GuardPro reconnectCooldownMs must be a finite number greater than or equal to 0');
+    }
+
     this.redisUrl = config.redisUrl;
     this.budget = budget.maxUsd;
     this.budgetThresholdUsd = budget.thresholdUsd;
     this.windowSeconds = windowSeconds;
+    this.reconnectCooldownMs = reconnectCooldownMs;
     this.projectId = readString(config.projectId);
     this.runId = readString(config.runId);
     this.allowLocalFallback = config.allowLocalFallback === true;
@@ -262,8 +381,19 @@ export class GuardPro {
     if (redis) {
       try {
         const value = await redis.get(this.getSpendKey(projectId));
-        return value ? Number(value) : 0;
-      } catch {
+        if (value === null || value === undefined || value === '') {
+          return 0;
+        }
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+          throw this.sharedBudgetUnavailable(projectId);
+        }
+        this.markConnected();
+        return roundMoney(parsed);
+      } catch (error) {
+        if (error instanceof GuardError) {
+          throw error;
+        }
         this.markDisconnected();
       }
     }
@@ -286,6 +416,7 @@ export class GuardPro {
 
     try {
       await redis.del(this.getSpendKey(projectId));
+      this.markConnected();
     } catch {
       this.markDisconnected();
     }
@@ -301,19 +432,19 @@ export class GuardPro {
 
   /**
    * Releases this instance's pooled Redis reference and closes the connection when unused.
+   *
+   * Only connections this class opened are closed. A client passed in through `redisClient`
+   * belongs to the caller and may be shared with other guards, other libraries, or the caller's own
+   * code, so shutting it down here would break every other holder of the same socket. Callers that
+   * inject a client are responsible for closing it.
    */
   async shutdown(): Promise<void> {
-    if (this.poolEntry) {
-      this.poolEntry.refs -= 1;
-      if (this.poolEntry.refs <= 0) {
-        GuardPro.pools.delete(this.redisUrl);
-        await this.safeQuit(this.poolEntry.client);
-      }
-      return;
-    }
+    if (!this.poolEntry) return;
 
-    if (this.redisClient) {
-      await this.safeQuit(this.redisClient);
+    this.poolEntry.refs -= 1;
+    if (this.poolEntry.refs <= 0) {
+      GuardPro.pools.delete(this.redisUrl);
+      await this.safeQuit(this.poolEntry.client);
     }
   }
 
@@ -328,6 +459,7 @@ export class GuardPro {
       client: createLazyRedisClient(redisUrl),
       refs: 1,
       connected: false,
+      retryAfter: 0,
     };
 
     entry.client.on?.('ready', () => {
@@ -361,8 +493,22 @@ export class GuardPro {
   private async getUsableRedis(): Promise<GuardProRedisClient | null> {
     const client = this.redisClient;
     if (!client) return null;
-    if (!this.poolEntry && this.directRedisFailed) return null;
+
+    // The cooldown is checked before readiness on purpose. A client can still report `ready` after
+    // its last command failed, and a client that is mid-outage must not be handed back just because
+    // its own status has not caught up yet.
+    const retryAfter = this.poolEntry ? this.poolEntry.retryAfter : this.retryAfter;
+    if (Date.now() < retryAfter) return null;
+
     if (client.status === 'ready') return client;
+
+    // A client that has already served a command is trusted over its own status string. The status is
+    // the weaker signal: drivers report it late, leave it in `wait`/`connecting` after a successful
+    // handshake, and differ between versions. A command that returned proves the socket works, so
+    // re-running connect() on the next request would only add connection churn to a healthy client.
+    // The trust is dropped by markDisconnected() on the first failing command, which also starts the
+    // cooldown. The pooled path below applies the same rule through `poolEntry.connected`.
+    if (this.directRedisReady && !this.directRedisFailed) return client;
 
     if (this.poolEntry) {
       if (this.poolEntry.connected) return client;
@@ -370,19 +516,38 @@ export class GuardPro {
       return this.poolEntry.connectPromise;
     }
 
-    return this.connect(client);
+    this.directConnectPromise ??= this.connect(client).finally(() => {
+      this.directConnectPromise = undefined;
+    });
+    return this.directConnectPromise;
   }
 
   private async connect(client: GuardProRedisClient): Promise<GuardProRedisClient | null> {
     try {
       await client.connect?.();
+
+      // A client that exposes `status` is only usable once it reports `ready`. A client that
+      // resolves connect() and then reports anything else has not joined the pool, and treating it
+      // as connected would leave `connected` false with no cooldown set: every subsequent guarded
+      // request would fall through to another connect() and the guard would turn one slow or
+      // wedged connection into a connect attempt per request, which is the exact amplification
+      // the cooldown exists to prevent.
+      const ready = client.status === undefined || client.status === 'ready';
+      const retryAfter = ready ? 0 : Date.now() + this.reconnectCooldownMs;
+
       if (this.poolEntry) {
-        this.poolEntry.connected = client.status === undefined || client.status === 'ready';
+        this.poolEntry.connected = ready;
         this.poolEntry.connectPromise = undefined;
+        this.poolEntry.retryAfter = retryAfter;
       } else {
-        this.directRedisFailed = false;
-        this.directRedisReady = true;
+        this.directRedisFailed = !ready;
+        this.directRedisReady = ready;
+        this.retryAfter = retryAfter;
       }
+
+      // Still handed back so the caller gets one attempt at the command. A client that reports a
+      // non-ready status but can serve commands succeeds here and clears the cooldown through
+      // markConnected(); one that cannot fails in chargeRedisOrFallback and fails closed.
       return client;
     } catch {
       this.markDisconnected();
@@ -397,7 +562,9 @@ export class GuardPro {
     estimatedCost: number
   ): Promise<ChargeDecision> {
     try {
-      return await this.chargeRedis(redis, key, estimatedCost);
+      const decision = await this.chargeRedis(redis, key, estimatedCost);
+      this.markConnected();
+      return decision;
     } catch {
       this.markDisconnected();
       if (!this.allowLocalFallback) {
@@ -416,55 +583,51 @@ export class GuardPro {
   }
 
   private async chargeRedis(redis: GuardProRedisClient, key: string, estimatedCost: number): Promise<ChargeDecision> {
-    const script = `
-      local currentRaw = redis.call("GET", KEYS[1])
-      if not currentRaw then
-        currentRaw = "0"
-      end
-      local current = tonumber(currentRaw)
-      local amount = tonumber(ARGV[1])
-      local budget = tonumber(ARGV[3])
-      local projected = current + amount
-      if projected > budget then
-        return {0, currentRaw, tostring(projected)}
-      end
-      local total = redis.call("INCRBYFLOAT", KEYS[1], ARGV[1])
-      local ttl = redis.call("TTL", KEYS[1])
-      if ttl == -1 then
-        redis.call("EXPIRE", KEYS[1], ARGV[2])
-      end
-      return {1, total, tostring(projected)}
-    `;
-
     const result = await redis.eval(
-      script,
+      SPEND_DECISION_SCRIPT,
       1,
       key,
-      estimatedCost.toString(),
-      this.windowSeconds.toString(),
-      this.budget.toString()
+      String(toMicros(estimatedCost, 'estimatedCost')),
+      String(Math.trunc(this.windowSeconds)),
+      String(toMicros(this.budget, 'budget'))
     );
 
     return parseRedisChargeDecision(result);
   }
 
+  /**
+   * In-process fallback that is decision-identical to the Redis script.
+   *
+   * This runs the exact same arithmetic `SPEND_DECISION_SCRIPT` runs: the stored total, the charge,
+   * and the budget are each converted to integer micro-dollars, and only the integers are compared.
+   * Rounding the *sum* against an unrounded budget instead (the previous implementation) made the two
+   * paths disagree at the boundary, so a budget of `0.0000005` blocked a `0.000001` charge locally
+   * while the shared path allowed it, because both sides collapse to `1` micro-dollar and the
+   * authoritative comparison `1 > 1` is false. A caller that fails over between Redis and the
+   * fallback must not observe a different allow/block answer, so the integer comparison is
+   * duplicated here rather than approximated.
+   */
   private chargeLocal(projectId: string, estimatedCost: number): ChargeDecision {
     const record = this.getLocal(projectId);
-    const projectedTotal = roundMoney(record.total + estimatedCost);
-    if (projectedTotal > this.budget) {
+    const currentMicros = toMicros(record.total, 'total');
+    const amountMicros = toMicros(estimatedCost, 'estimatedCost');
+    const budgetMicros = toMicros(this.budget, 'budget');
+    const projectedMicros = currentMicros + amountMicros;
+
+    if (projectedMicros > budgetMicros) {
       return {
         allowed: false,
-        total: roundMoney(record.total),
-        projectedTotal,
+        total: fromMicros(currentMicros),
+        projectedTotal: fromMicros(projectedMicros),
       };
     }
 
-    record.total = projectedTotal;
+    record.total = fromMicros(projectedMicros);
     this.localSpend.set(projectId, record);
     return {
       allowed: true,
       total: record.total,
-      projectedTotal,
+      projectedTotal: record.total,
     };
   }
 
@@ -485,12 +648,33 @@ export class GuardPro {
   }
 
   private markDisconnected(): void {
+    const retryAfter = Date.now() + this.reconnectCooldownMs;
     if (this.poolEntry) {
       this.poolEntry.connected = false;
       this.poolEntry.connectPromise = undefined;
+      this.poolEntry.retryAfter = retryAfter;
     } else {
       this.directRedisFailed = true;
       this.directRedisReady = false;
+      this.retryAfter = retryAfter;
+    }
+  }
+
+  /**
+   * Clears the failure state after a command actually succeeds.
+   *
+   * Without this, a client whose `status` is still `ready` after a single transient command error
+   * would be reported as disconnected forever: nothing would ever clear the flag except a fresh
+   * `connect()`, which a ready client is never asked for.
+   */
+  private markConnected(): void {
+    if (this.poolEntry) {
+      this.poolEntry.connected = true;
+      this.poolEntry.retryAfter = 0;
+    } else {
+      this.directRedisFailed = false;
+      this.directRedisReady = true;
+      this.retryAfter = 0;
     }
   }
 
@@ -658,5 +842,19 @@ function parseRedisChargeDecision(result: unknown): ChargeDecision {
 }
 
 function roundMoney(value: number): number {
-  return Math.round(validateMoney(value, 'money') * 1_000_000) / 1_000_000;
+  return Math.round(validateMoney(value, 'money') * MONEY_SCALE) / MONEY_SCALE;
+}
+
+/** Converts a validated USD amount to exact integer micro-dollars. */
+function toMicros(value: number, field: string): number {
+  const micros = Math.round(validateMoney(value, field) * MONEY_SCALE);
+  if (!Number.isSafeInteger(micros)) {
+    throw proConfigError(`${field} exceeds the maximum supported amount of 9007199254.740991`);
+  }
+  return micros;
+}
+
+/** Converts integer micro-dollars back to the 6-decimal USD value stored in memory. */
+function fromMicros(micros: number): number {
+  return micros / MONEY_SCALE;
 }

@@ -40,9 +40,12 @@ Two things are easy to assume and worth stating plainly.
 expected to cost and blocks on that reservation. Provider-reported usage is recorded for visibility
 but never refunds a reservation. A request that would cost exactly the remaining budget is allowed.
 
-**Built-in pricing is a snapshot, dated `2026-08-23`.** Nothing here fetches provider pricing, and
-the package warns you once at startup when the snapshot is more than 30 days old. Verify the models
-you rely on and override them. See [docs/ACCOUNTING.md](docs/ACCOUNTING.md).
+**Built-in pricing is a snapshot, most recently verified `2026-09-30`.** Nothing here fetches provider
+pricing. Every entry carries its own `lastUpdated` date and the package warns you once at startup when
+an entry is more than 30 days old — 11 of 53 entries currently are, because they could not be
+re-verified. Verify the models you rely on and override them. See
+[docs/ACCOUNTING.md](docs/ACCOUNTING.md#which-models-are-priced) for exactly which models are priced and
+which are not.
 
 ## Install
 
@@ -274,6 +277,40 @@ guard(client, {
 Top-level `projectId` and `runId` are convenience aliases for alert payloads and default scope values.
 Scope identifiers are sensitive application data and are bounded to 256 characters. Process-local scope state is bounded by `maxScopes` (default: 10,000); exceeding the limit blocks new scopes rather than silently evicting budget state.
 
+### `scopeIdleTtlMs`
+
+A process that scopes requests by `sessionId` or `runId` will eventually fill `maxScopes`, because
+every scope it has ever seen is still counted. After that, every new session is blocked with
+`SCOPE_LIMIT_EXCEEDED` until the process restarts. `scopeIdleTtlMs` opts into reclaiming scopes that
+have gone idle, and only when a genuinely new scope arrives at a full map:
+
+```ts
+const guard = guard(client, { budget: 25, maxScopes: 5_000, scopeIdleTtlMs: 3_600_000 });
+```
+
+The rules are deliberately narrow:
+
+- Only scopes identified **purely** by `sessionId` or `runId` are eligible. `projectId` and `userId`
+  scopes and the implicit `default` scope are never dropped, because their accumulated spend has to
+  keep blocking.
+- A scope must have been idle for longer than the TTL. An active session is never touched.
+- The process-wide counters are never reset, so they still account for every dollar ever reserved.
+  Only the per-scope balance is forgotten. `state.reclaimedScopeCount` reports how many scopes were
+  dropped.
+
+The cost of opting in is that an abandoned session that comes back after the TTL starts a fresh
+per-session budget. Set the TTL to at least as long as a session is expected to live. Without this
+option nothing is ever reclaimed and the previous fail-closed behavior is unchanged.
+
+`budget` is a **per-scope** ceiling, not a per-process one. The process-wide counters are reporting
+only: they are never consulted when deciding to block, so there is no process-wide spend cap behind
+them. A caller that keeps introducing new `sessionId`/`runId` values can therefore spend more than
+`budget` in total, because every new scope arriving at a full map can trigger another sweep that
+reclaims up to `maxScopes` idle scopes. A fixed set of identifiers that recycles among itself is
+bounded to `budget` per identifier per TTL window. If you need a hard process-wide ceiling, scope by
+`projectId`/`userId` (never reclaimed) or use the shared-budget `GuardPro` path, where the total is
+held in Redis and idle reclamation cannot apply.
+
 ### `defaultOutputTokens`
 
 The guard must reserve output cost *before* the call, so it needs to know how many output tokens to
@@ -368,13 +405,14 @@ nothing" apart from "we never looked".
 
 Known model pricing comes from built-in registry entries, runtime registrations, or per-guard overrides. Unknown models are blocked by default. Invalid pricing is rejected rather than converted to zero cost.
 
-Pricing last updated: `2026-08-23`. **This is a dated, hand-maintained snapshot, not a live feed.**
-AI CostGuard never fetches provider pricing. When the snapshot is more than 30 days old the package
-says so once at startup:
+Pricing last verified: `2026-09-30`. **This is a dated, hand-maintained snapshot, not a live feed.**
+AI CostGuard never fetches provider pricing. Each entry carries its own `lastUpdated`, so an entry you
+could not re-check keeps an older date rather than being silently refreshed. When an entry is more
+than 30 days old the package says so once at startup:
 
 ```text
-[ai-costguard] 25 of 25 built-in pricing entries are older than 30 days (last checked 2026-08-23).
-Built-in pricing is a hand-maintained snapshot (2026-08-23), not a live price feed. Verify a model
+[ai-costguard] 11 of 53 built-in pricing entries are older than 30 days (last checked 2026-09-30).
+Built-in pricing is a hand-maintained snapshot (2026-09-30), not a live price feed. Verify a model
 against its provider pricing page and override it when it differs.
 ```
 
@@ -384,9 +422,12 @@ be off, so verify the models you actually rely on. Check it from code or from CI
 ```ts
 import { isBuiltInPricingStale, BUILTIN_PRICING_LAST_UPDATED, listBuiltInPricing } from '@salimassili/ai-costguard';
 
-isBuiltInPricingStale();            // true when older than 30 days
-BUILTIN_PRICING_LAST_UPDATED;       // '2026-08-23'
-listBuiltInPricing().length;        // every built-in entry
+isBuiltInPricingStale();            // true when any entry is older than 30 days
+BUILTIN_PRICING_LAST_UPDATED;       // '2026-09-30' — the most recent verification pass
+listBuiltInPricing().length;        // 53 built-in entries
+listBuiltInPricing()
+  .filter((e) => e.lastUpdated !== BUILTIN_PRICING_LAST_UPDATED)
+  .map((e) => e.model);             // the 11 that were not re-verified
 ```
 
 ```ts
@@ -735,8 +776,8 @@ free. The three ways a reservation can still be wrong are the ones above it: a f
 guess, a caller-supplied `estimatedCost` through `middleware()`, and an approximate token count.
 
 **Not guaranteed.** That the model name was priced exactly. A `-`/`:` suffix falls back to the
-nearest family entry, so `o3-pro` is costed at the `o3` rate. Check `getPricingMeta(m)?.match ===
-'exact'` to assert this, and register a price to pin it. See
+nearest family entry, so `gpt-4o-realtime-preview` is costed at the `gpt-4o` rate. Check
+`getPricingMeta(m)?.match === 'exact'` to assert this, and register a price to pin it. See
 [docs/ACCOUNTING.md](docs/ACCOUNTING.md#family-prefix-fallback-a-name-that-looks-unknown-is-often-priced-anyway).
 
 **Not guaranteed.** Anything across a process boundary. Separate processes, `worker_threads`, and

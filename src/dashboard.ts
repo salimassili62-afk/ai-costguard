@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { GuardErrorCode, GuardEventName } from './core/types.js';
 
@@ -66,10 +66,44 @@ export function getDefaultEventLogPath(): string {
 }
 
 /**
+ * Parsed events for one log file, reused while the file itself is unchanged.
+ *
+ * The dashboard is polled, and every poll used to re-read and re-parse the whole JSONL file
+ * synchronously on the request path. On a busy guard that is thousands of JSON.parse calls per
+ * request, all of it blocking the event loop of the application the dashboard was started from. The
+ * log is append-only, so its size and mtime identify its contents well enough to reuse a parse: any
+ * append or rewrite changes both.
+ */
+let parsedLog: { path: string; size: number; mtimeMs: number; events: DashboardEvent[] } | undefined;
+
+/**
  * Reads dashboard events from a local JSONL event log.
  */
 export function readDashboardEvents(eventLogPath = DEFAULT_EVENT_LOG_PATH): DashboardEvent[] {
-  if (!existsSync(eventLogPath)) return [];
+  let stats;
+  try {
+    stats = statSync(eventLogPath);
+  } catch {
+    parsedLog = undefined;
+    return [];
+  }
+
+  // A path that exists but is not a readable file is a misconfiguration, and it throws so the server
+  // reports it. Returning an empty summary instead would render a dashboard that looks like a quiet
+  // day right after the operator pointed it at the wrong file.
+  if (!stats.isFile()) {
+    throw new Error(`Event log path is not a readable file: ${eventLogPath}`);
+  }
+
+  if (
+    parsedLog &&
+    parsedLog.path === eventLogPath &&
+    parsedLog.size === stats.size &&
+    parsedLog.mtimeMs === stats.mtimeMs
+  ) {
+    // A copy, so a caller that mutates the result cannot poison the cache for the next poll.
+    return parsedLog.events.slice();
+  }
 
   const lines = readFileSync(eventLogPath, 'utf8')
     .split(/\r?\n/u)
@@ -82,7 +116,8 @@ export function readDashboardEvents(eventLogPath = DEFAULT_EVENT_LOG_PATH): Dash
     if (event) events.push(event);
   }
 
-  return events;
+  parsedLog = { path: eventLogPath, size: stats.size, mtimeMs: stats.mtimeMs, events };
+  return events.slice();
 }
 
 /**
@@ -172,7 +207,7 @@ export function startDashboardServer(options: DashboardOptions = {}): Promise<{ 
       return;
     }
 
-    if (request.url?.startsWith('/events.json')) {
+    if (isJsonRoute(request.url)) {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify(summary, null, 2));
       return;
@@ -200,6 +235,19 @@ export function startDashboardServer(options: DashboardOptions = {}): Promise<{ 
 
 function isLoopbackHost(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+/**
+ * Matches the JSON summary route exactly, ignoring the query string.
+ *
+ * A `startsWith` test also answered `/events.json.bak`, `/events.jsonl`, and `/events.jsonfoo` with
+ * raw JSON, which is both wrong and an easy way to leak the summary to a link that was meant to be a
+ * page.
+ */
+function isJsonRoute(url: string | undefined): boolean {
+  if (!url) return false;
+  const path = url.split(/[?#]/u, 1)[0];
+  return path === '/events.json';
 }
 
 function renderDashboardHtml(summary: DashboardSummary): string {

@@ -1,6 +1,15 @@
 const STALE_PRICING_DAYS = 30;
 
 /**
+ * Date on which the OpenAI and Anthropic entries in the built-in registry were last re-checked
+ * against the provider pricing pages referenced by each entry's `source`.
+ *
+ * Entries that could not be re-verified keep an older `lastUpdated` of their own instead of
+ * inheriting this date.
+ */
+const VERIFIED_ON = '2026-09-30';
+
+/**
  * Days after which a pricing entry is reported as stale.
  *
  * Exported so the CLI, the runtime warning, and the documentation cannot drift apart.
@@ -15,7 +24,7 @@ export const PRICING_STALE_AFTER_DAYS = STALE_PRICING_DAYS;
  * `source` URL so a mismatch can be checked by hand, and `pricingOverrides` /
  * `registerPricing` are the supported way to replace a price that is wrong for your contract.
  */
-export const BUILTIN_PRICING_LAST_UPDATED = '2026-08-23';
+export const BUILTIN_PRICING_LAST_UPDATED = '2026-09-30';
 
 /**
  * Human-readable caveat attached to the built-in registry.
@@ -57,9 +66,9 @@ export type PricingOrigin = 'override' | 'runtime' | 'builtin';
  * How closely the resolved entry's model name matched the requested name.
  *
  * A `family-prefix` match means the requested name was not in the registry and was priced from the
- * nearest longer-or-equal family, so `o3-pro` is costed at the `o3` price and `gpt-5-ultra` at the
- * `gpt-5` price. The call is still costed, so the budget still moves, but the figure is an
- * assumption rather than a verified price and can be wrong in either direction.
+ * nearest longer-or-equal family, so `gpt-4o-realtime-preview` is costed at the `gpt-4o` price and
+ * `gpt-5-ultra` at the `gpt-5` price. The call is still costed, so the budget still moves, but the
+ * figure is an assumption rather than a verified price and can be wrong in either direction.
  */
 export type PricingMatch = 'exact' | 'family-prefix';
 
@@ -114,6 +123,23 @@ export function validatePricing(entry: ModelPricing, field = 'pricing'): void {
   }
 }
 
+const OPENAI_SOURCE = 'https://platform.openai.com/docs/pricing';
+const ANTHROPIC_SOURCE = 'https://platform.claude.com/docs/en/about-claude/pricing';
+
+/**
+ * Built-in price table, in USD per 1,000 tokens.
+ *
+ * Every entry's `lastUpdated` records when *that entry* was last checked against its provider
+ * page, so a single unverifiable model does not date the whole registry. Entries that could not be
+ * re-verified in the latest pass deliberately keep their older date instead of being silently
+ * refreshed; see `UNVERIFIED_PRICING_MODELS` in the README.
+ *
+ * Deliberately absent: models whose price depends on the request's context length. `ModelPricing`
+ * carries one price pair per model, so adding such a model would bake in the short-context price
+ * and under-reserve budget on long-context requests, which is the unsafe direction for a cost
+ * guard. Those identifiers are left unknown so they hit the fail-closed UNKNOWN_MODEL block and
+ * can be added through `pricingOverrides`.
+ */
 const BUILTIN_PRICING: readonly ModelPricing[] = [
   {
     model: 'gpt-4',
@@ -124,103 +150,307 @@ const BUILTIN_PRICING: readonly ModelPricing[] = [
   },
   {
     model: 'gpt-4o',
+    inputPer1kTokens: 0.0025,
+    outputPer1kTokens: 0.01,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-4o-2024-05-13',
     inputPer1kTokens: 0.005,
     outputPer1kTokens: 0.015,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-4o-2024-08-06',
+    inputPer1kTokens: 0.0025,
+    outputPer1kTokens: 0.01,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'gpt-4o-mini',
     inputPer1kTokens: 0.00015,
     outputPer1kTokens: 0.0006,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'gpt-4.1',
     inputPer1kTokens: 0.002,
     outputPer1kTokens: 0.008,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'gpt-4.1-mini',
     inputPer1kTokens: 0.0004,
     outputPer1kTokens: 0.0016,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'gpt-4.1-nano',
     inputPer1kTokens: 0.0001,
     outputPer1kTokens: 0.0004,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    // Priced explicitly because the `gpt-4` family price is $30/$60; without this entry
+    // `gpt-4-turbo-2024-04-09` would inherit three times the real input price.
+    model: 'gpt-4-turbo-2024-04-09',
+    inputPer1kTokens: 0.01,
+    outputPer1kTokens: 0.03,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'gpt-3.5-turbo',
     inputPer1kTokens: 0.0005,
     outputPer1kTokens: 0.0015,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    // The 3.5-turbo family is not priced uniformly, so each dated/completion variant is pinned to
+    // its own published price instead of inheriting the base $0.50/$1.50 rate.
+    model: 'gpt-3.5-turbo-0125',
+    inputPer1kTokens: 0.0005,
+    outputPer1kTokens: 0.0015,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-3.5-turbo-1106',
+    inputPer1kTokens: 0.001,
+    outputPer1kTokens: 0.002,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-3.5-turbo-instruct',
+    inputPer1kTokens: 0.0015,
+    outputPer1kTokens: 0.002,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'o1',
+    inputPer1kTokens: 0.015,
+    outputPer1kTokens: 0.06,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'o1-pro',
+    inputPer1kTokens: 0.15,
+    outputPer1kTokens: 0.6,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'o3',
     inputPer1kTokens: 0.002,
     outputPer1kTokens: 0.008,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'o3-mini',
+    inputPer1kTokens: 0.0011,
+    outputPer1kTokens: 0.0044,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'o3-pro',
+    inputPer1kTokens: 0.02,
+    outputPer1kTokens: 0.08,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'o4-mini',
     inputPer1kTokens: 0.0011,
     outputPer1kTokens: 0.0044,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'gpt-5',
     inputPer1kTokens: 0.00125,
     outputPer1kTokens: 0.01,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'gpt-5-mini',
     inputPer1kTokens: 0.00025,
     outputPer1kTokens: 0.002,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'gpt-5-nano',
     inputPer1kTokens: 0.00005,
     outputPer1kTokens: 0.0004,
-    lastUpdated: '2026-08-23',
-    source: 'https://openai.com/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-5-pro',
+    inputPer1kTokens: 0.015,
+    outputPer1kTokens: 0.12,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-5.1',
+    inputPer1kTokens: 0.00125,
+    outputPer1kTokens: 0.01,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-5.2',
+    inputPer1kTokens: 0.00175,
+    outputPer1kTokens: 0.014,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-5.2-pro',
+    inputPer1kTokens: 0.021,
+    outputPer1kTokens: 0.168,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    // `gpt-5.4` itself is excluded because its price is context-length dependent, but its two
+    // non-tiered variants are published at a single rate and are safe to price exactly.
+    model: 'gpt-5.4-mini',
+    inputPer1kTokens: 0.00075,
+    outputPer1kTokens: 0.0045,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'gpt-5.4-nano',
+    inputPer1kTokens: 0.0002,
+    outputPer1kTokens: 0.00125,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
+  },
+  {
+    model: 'text-embedding-3-small',
+    inputPer1kTokens: 0.00002,
+    outputPer1kTokens: 0,
+    lastUpdated: VERIFIED_ON,
+    source: OPENAI_SOURCE,
   },
   {
     model: 'claude-opus-4-1',
     inputPer1kTokens: 0.015,
     outputPer1kTokens: 0.075,
-    lastUpdated: '2026-08-23',
-    source: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-opus-4-5',
+    inputPer1kTokens: 0.005,
+    outputPer1kTokens: 0.025,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-opus-4-6',
+    inputPer1kTokens: 0.005,
+    outputPer1kTokens: 0.025,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-opus-4-7',
+    inputPer1kTokens: 0.005,
+    outputPer1kTokens: 0.025,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-opus-4-8',
+    inputPer1kTokens: 0.005,
+    outputPer1kTokens: 0.025,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-opus-5',
+    inputPer1kTokens: 0.005,
+    outputPer1kTokens: 0.025,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-opus-5-5',
+    inputPer1kTokens: 0.004,
+    outputPer1kTokens: 0.02,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-sonnet-4',
+    inputPer1kTokens: 0.003,
+    outputPer1kTokens: 0.015,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
   },
   {
     model: 'claude-sonnet-4-5',
     inputPer1kTokens: 0.003,
     outputPer1kTokens: 0.015,
-    lastUpdated: '2026-08-23',
-    source: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-sonnet-4-6',
+    inputPer1kTokens: 0.003,
+    outputPer1kTokens: 0.015,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-sonnet-5',
+    inputPer1kTokens: 0.002,
+    outputPer1kTokens: 0.01,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-sonnet-5-5',
+    inputPer1kTokens: 0.002,
+    outputPer1kTokens: 0.01,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
+  },
+  {
+    model: 'claude-haiku-3-5',
+    inputPer1kTokens: 0.0008,
+    outputPer1kTokens: 0.004,
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
   },
   {
     model: 'claude-haiku-4-5',
     inputPer1kTokens: 0.001,
     outputPer1kTokens: 0.005,
-    lastUpdated: '2026-08-23',
-    source: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    lastUpdated: VERIFIED_ON,
+    source: ANTHROPIC_SOURCE,
   },
   {
+    // The Claude 3 generation is no longer listed on the provider pricing page, so these three
+    // entries could not be re-verified and keep their original 2026-08-23 date on purpose.
     model: 'claude-3-opus',
     inputPer1kTokens: 0.015,
     outputPer1kTokens: 0.075,
@@ -242,6 +472,10 @@ const BUILTIN_PRICING: readonly ModelPricing[] = [
     source: 'https://www.anthropic.com/pricing',
   },
   {
+    // Google, Groq, Mistral, DeepSeek, and xAI prices below were not re-verified in the latest
+    // pass: the Gemini Developer API pricing page was unreachable, and the Vertex AI page that
+    // was reachable publishes conflicting tiers for `gemini-2.0-flash`. Prices are left unchanged
+    // and the original date is retained rather than guessing or falsely claiming verification.
     model: 'gemini-2.5-pro',
     inputPer1kTokens: 0.00125,
     outputPer1kTokens: 0.01,
