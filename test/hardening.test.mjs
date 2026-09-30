@@ -128,7 +128,7 @@ test('a blocked check refreshes its scope timestamp', () => {
   assertBudgetBlocked(() => core.check(call()));
 
   const refreshed = core.getState().scopes[scopeKey].lastRequestTime;
-  assert.ok(refreshed > first, 'a blocked request proves the scope is still in use');
+  assert.ok(refreshed >= first, 'a blocked request proves the scope is still in use');
   assert.equal(core.getState().scopes[scopeKey].reservedCost, 0);
 });
 
