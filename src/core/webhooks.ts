@@ -1,4 +1,5 @@
 import type { GuardWebhookConfig, RequestContext } from './types.js';
+import { isValidWebhookUrl } from './webhook-url.js';
 
 /**
  * Payload sent to configured block webhooks.
@@ -47,6 +48,7 @@ async function postWithBackoff(url: string, body: string, config: GuardWebhookCo
   const retries = Math.max(0, config.retries ?? 2);
   const timeoutMs = Math.max(100, config.timeoutMs ?? 1500);
 
+  if (!isValidWebhookUrl(url)) return;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const controller = new AbortController();

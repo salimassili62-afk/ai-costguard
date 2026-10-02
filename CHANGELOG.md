@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.3.2] - 2026-10-02
+
+Release-hardening pass. No public API changes; the exported surface is unchanged from 2.3.1.
+
+### Fixed
+
+- **Webhook URL validation.** `alerts.webhookUrl` and the legacy `webhooks.slack` / `webhooks.discord` destinations are now validated before any request is sent. HTTPS is required for remote URLs; plain HTTP is accepted only for loopback hosts (`localhost`, `127.0.0.1`, `[::1]`). Malformed URLs are rejected. Validation fails safely: it can never throw into, delay, or alter a guard/block decision, and webhook delivery remains best-effort and observability-only. Slack/Discord payload shapes are unchanged.
+- **Packaged README links.** `ARCHITECTURE.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `START-HERE.md` were linked from the shipped `README.md` but omitted from `package.json#files`, so the links resolved in the repository and 404'd in the published tarball. They are now shipped, and both the repository smoke test and the packed-package consumer test assert that every local link in `README.md` exists in the actual tarball.
+- Corrected `docs/SHARED-BUDGET.md`, which documented `GuardError.metadata` as carrying `projectId`. The runtime field is `scopeKey`; the doc now lists the real `GuardErrorMetadata` fields.
+
+### Changed
+
+- Bumped the package to `2.3.2`.
+- CI matrix now sets `fail-fast: false` so one Node version failing does not hide the status of the others.
+- Refreshed the Express and Next.js starter templates to depend on `@salimassili/ai-costguard` `^2.3.2`.
+
+### Added
+
+- `test/webhooks-validation.test.mjs`: focused coverage for HTTPS remote acceptance, HTTP loopback acceptance (`localhost`, `127.0.0.1`, `[::1]`), HTTP remote rejection, malformed-URL rejection, crash-safety, and both the modern alerts and legacy webhooks entry points.
+- `CODE_OF_CONDUCT.md`, bug/feature issue templates, and a pull request template.
+
 ## [2.3.0] - 2026-09-27
 
 Correctness, concurrency, and honesty release. No API removals; the public surface is a superset of

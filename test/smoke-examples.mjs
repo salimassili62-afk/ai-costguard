@@ -158,11 +158,29 @@ for (const required of [
   'dist/cjs/package.json',
   'dist/types/index.d.ts',
   'dist/types/pro.d.ts',
+  'ARCHITECTURE.md',
+  'CONTRIBUTING.md',
+  'SECURITY.md',
+  'START-HERE.md',
   'docs/ACCOUNTING.md',
   'docs/COVERAGE.md',
   'docs/SHARED-BUDGET.md',
+  'docs/DASHBOARD.md',
+  'docs/INTEGRATIONS.md',
+  'docs/BENCHMARKS.md',
 ]) {
   assert.ok(packedFiles.has(required), `npm pack --dry-run is missing ${required}; the published tarball would be broken`);
+}
+
+// Every document the shipped README links to must be present in the packed file list, not merely in
+// the working tree. A file can exist locally and still be absent from the tarball when `files`
+// drifts, which is exactly the release-blocking packaging bug this guards against.
+const rootDocs = readFileSync('README.md', 'utf8');
+for (const match of rootDocs.matchAll(/\]\((?:\.\/)?(docs\/[A-Za-z-]+\.md|START-HERE\.md|[A-Z]+\.md|LICENSE)\)/gu)) {
+  assert.ok(
+    packedFiles.has(match[1]),
+    `README links to ${match[1]}, but it is not in the packed tarball; add it to package.json#files`,
+  );
 }
 
 // Nothing ungenerated, secret-shaped, or local-only may ship.

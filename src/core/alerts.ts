@@ -3,6 +3,7 @@ import type {
   CostGuardAlertPayload,
   CostGuardAlertsConfig,
 } from './types.js';
+import { isValidWebhookUrl } from './webhook-url.js';
 
 const DEFAULT_ALERT_EVENTS: readonly CostGuardAlertEvent[] = ['blocked'];
 const DEFAULT_TIMEOUT_MS = 1500;
@@ -19,6 +20,8 @@ export async function sendCostGuardAlert(
 
   const webhookUrl = config.webhookUrl?.trim();
   if (!webhookUrl) return;
+
+  if (!isValidWebhookUrl(webhookUrl)) return;
 
   const events = config.events?.length ? config.events : DEFAULT_ALERT_EVENTS;
   if (!events.includes(payload.event)) return;

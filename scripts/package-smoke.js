@@ -55,13 +55,32 @@ try {
     'dist/types/index.d.ts',
     'dist/types/pro.d.ts',
     'README.md',
+    'CHANGELOG.md',
     'LICENSE',
+    'ARCHITECTURE.md',
+    'CONTRIBUTING.md',
+    'SECURITY.md',
+    'START-HERE.md',
     'docs/ACCOUNTING.md',
     'docs/COVERAGE.md',
     'docs/SHARED-BUDGET.md',
+    'docs/DASHBOARD.md',
+    'docs/INTEGRATIONS.md',
+    'docs/BENCHMARKS.md',
   ]) {
     if (!existsSync(join(installed, file))) {
       throw new Error(`packed tarball is missing ${file}. Check the "files" allowlist in package.json.`);
+    }
+  }
+
+  // --- every document the published README links to must ship in the same tarball ------------------
+  // The in-repo smoke test only checks the working tree, so a file can exist locally and still be
+  // absent from the tarball. Resolve each local markdown/LICENSE link against the installed package.
+  const installedReadme = readFileSync(join(installed, 'README.md'), 'utf8');
+  for (const match of installedReadme.matchAll(/\]\((?:\.\/)?(docs\/[A-Za-z-]+\.md|START-HERE\.md|[A-Z]+\.md|LICENSE)\)/gu)) {
+    const linked = match[1];
+    if (!existsSync(join(installed, linked))) {
+      throw new Error(`published README links to ${linked}, which is not in the packed tarball. Add it to "files" in package.json.`);
     }
   }
 

@@ -157,8 +157,8 @@ try {
 }
 ```
 
-Every `GuardError` also carries a `metadata` object with `projectId`, `model`, `estimatedCostUsd`,
-`budgetLimitUsd`, `reservedCostUsd`, and `remainingUsd`, so an alert can be built without
+Every `GuardError` also carries a `metadata` object with `code`, `reason`, `context`, `scopeKey`, `similarity?`,
+`model`, `estimatedCostUsd`, `budgetLimitUsd`, `reservedCostUsd`, and `remainingUsd`, so an alert can be built without
 re-deriving the numbers.
 
 ## Operational checklist
