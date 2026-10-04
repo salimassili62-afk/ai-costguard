@@ -2,9 +2,13 @@
 [![npm version](https://img.shields.io/npm/v/@salimassili/ai-costguard)](https://www.npmjs.com/package/@salimassili/ai-costguard)
 [![license](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
-**Free and open source. MIT licensed. No dependencies, no API key, no account, no telemetry, no
-paid tier, no license check.** If you are reading this wondering which feature is unlocked, the answer
+**Free and open source. 
+MIT licensed.
+No dependencies, no API key, no account, no telemetry , no license check.
+** If you are reading this wondering which feature is unlocked, the answer
 is all of them.
+The Free runtime is complete. 
+The paid product is a separate production-verification toolkit.
 
 AI CostGuard is a pre-call spend guard for Node.js AI agents. It evaluates selected model calls in
 process and blocks the next call when the configured estimated-cost or safety policy would be
