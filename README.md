@@ -5,25 +5,25 @@
 
 **A pre-call spend firewall for Node.js AI agents.**
 
-AI CostGuard estimates the cost of selected model calls and blocks requests that violate your configured budget or execution policies **before the provider method is called**.
+AI CostGuard estimates the cost of selected AI model calls and blocks requests that exceed your configured budget or execution limits **before the provider method is called**.
 
 - **Free and open source:** complete runtime under the MIT license.
 - **Local-first:** runs inside your Node.js process.
-- **No dependencies required by the core package, API key for the guard itself, account, telemetry, or license checks.**
-- **Separate paid product:** a Production Verification Toolkit for teams that need reproducible evidence of runtime behavior.
+- **No guard API key or cloud account required.**
+- **Built for control:** budgets, retry storms, repeated prompts, and execution limits.
 
-[Install from npm](https://www.npmjs.com/package/@salimassili/ai-costguard) · [Documentation](#documentation) · [Production Verification Toolkit](https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65)
+[Install from npm](https://www.npmjs.com/package/@salimassili/ai-costguard) · [Quick Start](#quick-start) · [Documentation](#documentation)
 
 ## Why AI CostGuard?
 
-AI agent costs can grow through repeated prompts, retry storms, excessive steps, and concurrent calls sharing a budget.
+AI agents can waste tokens and money through repeated prompts, retry storms, excessive steps, and concurrent calls.
 
-AI CostGuard adds an economic check before selected SDK calls execute.
+AI CostGuard adds a cost and execution check before selected SDK methods run.
 
 - Enforce estimated-cost budgets.
-- Detect repeated-prompt loops and retry storms.
 - Limit execution with `maxSteps`.
-- Reject requests when required pricing or output limits are unavailable.
+- Detect repeated-prompt loops and retry storms.
+- Reject calls when required pricing or output limits are unavailable.
 - Reserve budget atomically for concurrent calls within one process.
 - Emit structured errors and optional local events and webhook alerts.
 
@@ -71,18 +71,19 @@ try {
 }
 ```
 
-The example uses a budget of **$5** for the configured scope. Set your provider API key as an environment variable before making a real provider call.
+The example configures a **$5 estimated-cost budget** for the selected scope. Set `OPENAI_API_KEY` in your environment before making a real provider call.
 
-## See a Block in 90 Seconds
+## Try It Without API Costs
 
-Clone the repository, then run the deterministic mock demo:
+Clone the repository and run the deterministic mock demo:
 
 ```bash
+npm ci
 npm run build
 node examples/integrations/quick-demo.mjs
 ```
 
-No provider API key, network request, or paid API call is required for this demo.
+The demo requires no provider API key, network request, or paid API call.
 
 Expected output:
 
@@ -94,9 +95,9 @@ Provider calls: 2
 Blocked provider calls: 1
 ```
 
-The mock provider's own counter stays at two calls. The third request is blocked before the provider method executes.
+The third request is blocked before the mock provider method executes.
 
-## What It Protects
+## Coverage
 
 By default, AI CostGuard guards these SDK method paths:
 
@@ -105,9 +106,9 @@ By default, AI CostGuard guards these SDK method paths:
 - `responses.create`
 - `messages.create`
 
-It can also wrap custom methods and function-style SDK integrations. Other methods are passed through untouched unless explicitly configured.
+It can also wrap custom methods and function-style SDK integrations. Other methods pass through untouched unless explicitly configured.
 
-For custom methods:
+Example with a custom client:
 
 ```ts
 const client = guard(customClient, {
@@ -116,30 +117,22 @@ const client = guard(customClient, {
 });
 ```
 
-See [Coverage](docs/COVERAGE.md) for exactly what is and is not guarded.
+See [Coverage](docs/COVERAGE.md) for the precise list of guarded and unguarded methods.
 
-## Important Limits
+## Important Limitations
 
-AI CostGuard is a **pre-call estimator, not a billing ledger or an exact-cost guarantee**.
+AI CostGuard is a **pre-call cost estimator, not a billing ledger or an exact-cost guarantee**.
 
-- **Estimates, not invoices.** Budget decisions use estimated cost reserved before a call. Provider-reported usage is for visibility and does not refund reservations.
-- **Pricing can become stale.** Built-in pricing is a hand-maintained snapshot, not a live provider feed. Verify prices and override them when needed.
-- **Token counts can be approximate.** Register a provider tokenizer when tighter estimates matter.
-- **Process-local budgets.** In-memory enforcement does not create one shared budget across independent processes or workers.
-- **Coverage is explicit.** Raw `fetch`, unwrapped clients, and unlisted methods are not intercepted.
-- **Streaming is unsupported by the guard.** Requests with `stream: true` are rejected rather than charged using an unknown final token count.
-- **Loop and retry detection are heuristics.** False positives and false negatives are possible.
-- **Not a security boundary.** It does not secure API keys, reconcile invoices, or replace provider billing alerts.
+- **Estimated costs:** budget decisions use estimated costs reserved before a call. Provider-reported usage does not refund those reservations.
+- **Pricing freshness:** built-in pricing is a maintained snapshot, not a live provider feed. Verify prices and override them when necessary.
+- **Token estimation:** token counts can be approximate. Register a provider tokenizer when tighter estimates matter.
+- **Process-local budgets:** independent processes and workers do not automatically share one budget.
+- **Explicit coverage:** raw `fetch`, unwrapped clients, and unlisted methods are not intercepted.
+- **Streaming:** requests with `stream: true` are rejected rather than guarded using an unknown final token count.
+- **Heuristic detection:** loop and retry detection can produce false positives or false negatives.
+- **Not a security boundary:** AI CostGuard does not protect API keys, reconcile invoices, or replace provider billing alerts.
 
-Some model names may match a built-in family pricing entry rather than an exact entry. Verify the selected price for production use.
-
-## Free Runtime vs. Paid Toolkit
-
-The runtime is free, complete, and MIT-licensed. **There is no paid runtime tier or feature unlock.**
-
-The separate [Production Verification Toolkit](https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65) is a paid product for teams that need production-verification materials beyond the runtime itself.
-
-The toolkit does not unlock runtime features. Review its checkout page for the current offer and included deliverables.
+Some model names may resolve to a built-in model-family pricing entry instead of an exact model entry. Verify production pricing before relying on estimates.
 
 ## Documentation
 
@@ -165,5 +158,5 @@ npm run smoke
 
 ## License
 
-MIT. 
-See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
+
