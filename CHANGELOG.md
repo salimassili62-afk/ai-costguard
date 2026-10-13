@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.3.3] - 2026-10-13
+
+Documentation-only release. No runtime, API, dependency, or behavioral changes.
+
+### Documentation
+
+- Rewrote `README.md` as a concise, task-first guide covering what the guard does, a Quick Start, default method coverage, an explicit `GuardError` code reference (including the `error.metadata` fields), and an "Important Limitations" section.
+- Restored the `START-HERE.md` link in the README documentation index.
+- Documented both supported ways to run the zero-cost mock demo — from the published package (`node node_modules/@salimassili/ai-costguard/examples/integrations/quick-demo.mjs`) and from a source checkout — clarifying that installing requires network access while the demo itself does not.
+
+### Changed
+
+- Bumped the package to `2.3.3` so npm displays the corrected README.
+
 ## [2.3.2] - 2026-10-02
 
 Release-hardening pass. No public API changes; the exported surface is unchanged from 2.3.1.

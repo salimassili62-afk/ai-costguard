@@ -75,15 +75,24 @@ The example configures a **$5 estimated-cost budget** for the selected scope. Se
 
 ## Try It Without API Costs
 
-Clone the repository and run the deterministic mock demo:
+The deterministic mock demo proves the guard blocks a request **before** the provider method runs,
+using a fake provider. Downloading or installing the package requires network access, but the mock
+demo itself needs no provider credentials, makes no paid API call, and makes no network request.
+
+**If you installed from npm:**
+
+```bash
+npm install @salimassili/ai-costguard
+node node_modules/@salimassili/ai-costguard/examples/integrations/quick-demo.mjs
+```
+
+**If you are working from a source checkout:**
 
 ```bash
 npm ci
 npm run build
 node examples/integrations/quick-demo.mjs
 ```
-
-The demo requires no provider API key, network request, or paid API call.
 
 Expected output:
 
@@ -119,6 +128,29 @@ const client = guard(customClient, {
 
 See [Coverage](docs/COVERAGE.md) for the precise list of guarded and unguarded methods.
 
+## Errors
+
+A blocked call throws a `GuardError` **before** the provider method runs. Branch on the stable
+`error.code`; never parse the message text.
+
+| Code | Meaning |
+| --- | --- |
+| `BUDGET_EXCEEDED` | The reservation would push this scope past its budget. |
+| `UNKNOWN_MODEL` | No pricing entry for this model. The message names the closest built-in sibling. |
+| `OUTPUT_LIMIT_REQUIRED` | No output token limit on the request and no `defaultOutputTokens`. |
+| `LOOP_DETECTED` | Too many near-identical recent prompts. |
+| `RETRY_STORM_DETECTED` | Too many retry or failure prompts. |
+| `MAX_STEPS_EXCEEDED` | This scope already used its `maxSteps` allowance. |
+| `STREAMING_UNSUPPORTED` | `stream: true`. Streams are blocked, not charged. |
+| `SCOPE_LIMIT_EXCEEDED` | `maxScopes` reached. New scopes are blocked, never silently evicted. |
+| `CONTEXT_INVALID` | The request could not be read as a model request. |
+| `CONFIG_INVALID` | Invalid `GuardConfig`. Thrown at construction, not per request. |
+| `SHARED_BUDGET_UNAVAILABLE` | Shared-budget (`/pro`) store unreachable. Fails closed. |
+
+Every `GuardError` also exposes `error.metadata` with `scopeKey`, `model`, `estimatedCostUsd`,
+`budgetLimitUsd`, `reservedCostUsd`, and `remainingUsd`. What each block decision means is detailed in
+[docs/COVERAGE.md](docs/COVERAGE.md) and [docs/ACCOUNTING.md](docs/ACCOUNTING.md).
+
 ## Important Limitations
 
 AI CostGuard is a **pre-call cost estimator, not a billing ledger or an exact-cost guarantee**.
@@ -142,6 +174,7 @@ Some model names may resolve to a built-in model-family pricing entry instead of
 - [SDK and framework integrations](docs/INTEGRATIONS.md)
 - [Local dashboard and operational caveats](docs/DASHBOARD.md)
 - [Benchmarks and measurement limits](docs/BENCHMARKS.md)
+- [Repository orientation](START-HERE.md)
 - [Architecture](ARCHITECTURE.md)
 - [Security reporting](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
