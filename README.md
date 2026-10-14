@@ -75,10 +75,24 @@ The example configures a **$5 estimated-cost budget** for the selected scope. Se
 
 ## Try It Without API Costs
 
+
 The deterministic mock demo proves the guard blocks a request **before** the provider method runs,
 using a fake provider. Downloading or installing the package requires network access, but the mock
 demo itself needs no provider credentials, makes no paid API call, and makes no network request.
+## Production Verification
 
+Already using AI CostGuard in production? The free runtime protects your application before selected AI provider calls. The paid **AI CostGuard Production Verification Toolkit** helps you verify the installed runtime before release.
+
+- **14 verification groups** covering runtime behavior and documented guarantees.
+- **Structured evidence:** Markdown and JSON reports, plus JUnit XML for CI.
+- **Failure testing:** a defined corpus of failure scenarios and checks for accounting and concurrency invariants.
+- **Release verdicts:** PASS, PASS_WITH_WARNINGS, FAIL, or BLOCKED.
+
+The toolkit runs locally against the installed runtime. It does not require a cloud account, telemetry, or a runtime license key.
+
+**Price: $199 one-time.**
+
+[Get the Production Verification Toolkit](https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65)
 **If you installed from npm:**
 
 ```bash
