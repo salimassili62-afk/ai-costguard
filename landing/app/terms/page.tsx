@@ -8,8 +8,8 @@ export default function TermsPage() {
           <h1 className="mb-4 text-2xl font-bold text-white">License and Disclaimer</h1>
 
           <p className="mb-4 text-sm text-gray-400">
-            AI CostGuard is free and MIT licensed. There is no purchase, no subscription, no account,
-            and no feature gate. The full license text is in the{' '}
+            AI CostGuard is free and MIT licensed. The software has no purchase, no subscription, no
+            account, and no feature gate. The full license text is in the{' '}
             <a
               href="https://github.com/salimassili62-afk/ai-costguard/blob/main/LICENSE"
               className="underline"
@@ -22,8 +22,11 @@ export default function TermsPage() {
           <h2 className="mt-4 mb-2 text-lg font-semibold text-white">License</h2>
           <p className="mb-4 text-sm text-gray-300">
             The software is licensed for personal and commercial use, including modification and
-            redistribution under the MIT terms. There is no separate paid tier, and no part of the
-            software is withheld behind a license key or activation step.
+            redistribution under the MIT terms. No part of the software is withheld behind a license
+            key, an activation step, or a paid tier. A separate, optional product, the AI CostGuard
+            Production Verification Toolkit, is sold independently for verifying an installed runtime
+            before release; it is not part of the software and is not required to use, modify, or
+            redistribute it.
           </p>
 
           <h2 className="mt-4 mb-2 text-lg font-semibold text-white">No Warranty</h2>

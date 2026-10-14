@@ -228,13 +228,33 @@ for (const file of walkFiles(['src'])) {
 
 for (const file of walkFiles(['examples', 'templates', 'landing', 'docs', 'README.md', 'START-HERE.md'])) {
   const content = readFileSync(file, 'utf8');
+  // The root README.md deliberately advertises the paid Production Verification Toolkit, so it is the
+  // one document allowed to carry that copy. `walkFiles` joins path segments, so the root README is
+  // exactly 'README.md' while every nested README (for example templates/*/README.md) keeps the
+  // prohibitions below.
+  const isRootReadme = file === 'README.md';
   assert.doesNotMatch(content, /\.\.\/src/u, `${file} imports private src`);
   assert.doesNotMatch(content, /firewall_blocked/u, `${file} uses stale error shape`);
   assert.doesNotMatch(content, /aifw budget|npx aifw init/u, `${file} advertises a nonexistent CLI command`);
   assert.doesNotMatch(content, /express-firewall|nextjs-firewall|ai-firewall/u, `${file} uses stale firewall naming`);
   assert.doesNotMatch(content, /\$29\/month|\$29\/mo|Pro-\$29/u, `${file} uses stale Pro pricing`);
-  assert.doesNotMatch(content, /lemonsqueezy|gumroad/iu, `${file} advertises a purchase link`);
-  assert.doesNotMatch(content, /Production Kit/iu, `${file} advertises a paid product`);
+  if (isRootReadme) {
+    // Swap the prohibitions for exact positive assertions: the README must name the current paid
+    // product and link to its current checkout, so removing or mistyping either one fails loudly.
+    assert.match(
+      content,
+      /AI CostGuard Production Verification Toolkit/u,
+      'README.md is missing the current paid toolkit name',
+    );
+    assert.match(
+      content,
+      /https:\/\/aicostguard\.lemonsqueezy\.com\/checkout\/buy\/8801cd1c-d7ea-4df8-a2e7-e54565f32e65/u,
+      'README.md is missing the current paid toolkit checkout URL',
+    );
+  } else {
+    assert.doesNotMatch(content, /lemonsqueezy|gumroad/iu, `${file} advertises a purchase link`);
+    assert.doesNotMatch(content, /Production Kit/iu, `${file} advertises a paid product`);
+  }
   assert.doesNotMatch(content, /docs\/PRO\.md|PRO_FEATURES\.md/u, `${file} links to a removed document`);
   assert.doesNotMatch(content, /pro-v0\.1|\bmarketing\//u, `${file} references a removed directory`);
 }
@@ -263,6 +283,7 @@ for (const file of walkFiles(['benchmarks', 'docs', 'examples', 'landing', 'READ
 
 for (const file of ['README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'ARCHITECTURE.md', 'START-HERE.md']) {
   const content = readFileSync(file, 'utf8');
+  const isRootReadme = file === 'README.md';
   assert.doesNotMatch(content, /AI Execution Firewall/u, `${file} uses stale product name`);
   // Target the call to action, not the words. A document is allowed to say "there is no paid tier";
   // what must not come back is an instruction to go and buy something.
@@ -271,7 +292,14 @@ for (const file of ['README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'ARCHITECTURE
     /\b(?:buy|purchase|upgrade to|subscribe to|get) (?:the )?(?:pro|production kit|premium|pro tier)\b/iu,
     `${file} contains a purchase call to action`
   );
-  assert.doesNotMatch(content, /\$\d+\s*(?:\/|per\s*)?(?:mo|month|year|one[- ]time)/iu, `${file} quotes a price`);
+  if (isRootReadme) {
+    // The README now quotes the Production Verification Toolkit's one-time price, so the generic
+    // price prohibition is replaced here by an exact assertion of that price. Every other document
+    // must still avoid quoting a price.
+    assert.match(content, /\$199 one-time/u, 'README.md is missing the documented toolkit price');
+  } else {
+    assert.doesNotMatch(content, /\$\d+\s*(?:\/|per\s*)?(?:mo|month|year|one[- ]time)/iu, `${file} quotes a price`);
+  }
 }
 
 /**

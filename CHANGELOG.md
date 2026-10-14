@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Documentation
+
+- Added a "Production Verification" section to `README.md` describing the separate, optional paid **AI CostGuard Production Verification Toolkit** (`$199`, one-time) and linking to its hosted checkout. The MIT-licensed runtime remains free and ungated: no license key, activation, or feature gate is introduced into the library.
+- Reconciled the paid-product wording in `START-HERE.md` and the landing license page so the free runtime and the separate paid toolkit are described distinctly rather than as mutually exclusive claims.
+
+### Changed
+
+- `test/smoke-examples.mjs` and `scripts/package-smoke.js` now permit the root `README.md` to carry the paid toolkit's name and checkout URL, while every other document and every shipped executable bundle keeps the existing paid-copy prohibitions.
+
 ## [2.3.3] - 2026-10-13
 
 Documentation-only release. No runtime, API, dependency, or behavioral changes.

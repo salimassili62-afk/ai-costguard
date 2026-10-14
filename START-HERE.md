@@ -4,8 +4,12 @@ Orientation for people who opened the repository rather than just the npm page. 
 use the library, [README.md](README.md) is the faster route; this file explains how the repository is
 laid out and which document answers which question.
 
-Everything here is MIT-licensed and free. There is no paid tier, no license key, no activation, and no
-telemetry. If you find yourself looking for a way to unlock something, you have found a bug.
+Everything in this repository and in the published package is MIT-licensed and free: no license key,
+no activation, no feature gate, and no telemetry, and nothing in the software is held back behind a
+paid tier. If you find yourself looking for a way to unlock something in the software, you have found
+a bug. A separate, optional paid product — the **AI CostGuard Production Verification Toolkit** —
+verifies an installed runtime before release; it is not part of this package, it does not gate the
+software, and it is described in [README.md](README.md#production-verification).
 
 ## Install
 
@@ -48,11 +52,12 @@ called. See [README.md](README.md) for the full tour.
 | `scripts/` | Build, test, package, and release tooling. |
 | `landing/` | The marketing site. Not part of the npm package. |
 
-There is no other top-level directory. Four were removed in 2.3.0: three described a paid product that
-no longer exists, and one duplicated `examples/integrations/quick-demo.mjs` while pinning a stale
-published version. History lives in git, not in the working tree. `test/smoke-examples.mjs` allowlists
-this directory list and fails if any of them reappear, so the authoritative list is asserted there rather
-than restated in prose that could drift.
+There is no other top-level directory. Four were removed in 2.3.0: three described the Pro kit, an
+earlier paid product that has since been retired, and one duplicated
+`examples/integrations/quick-demo.mjs` while pinning a stale published version. History lives in git,
+not in the working tree. `test/smoke-examples.mjs` allowlists this directory list and fails if any of
+them reappear, so the authoritative list is asserted there rather than restated in prose that could
+drift.
 
 ## Which document answers your question
 

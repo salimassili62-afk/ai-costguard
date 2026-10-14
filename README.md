@@ -180,6 +180,21 @@ AI CostGuard is a **pre-call cost estimator, not a billing ledger or an exact-co
 
 Some model names may resolve to a built-in model-family pricing entry instead of an exact model entry. Verify production pricing before relying on estimates.
 
+## Production Verification
+
+Already using AI CostGuard in production? The free runtime protects your application before selected AI provider calls. The paid **AI CostGuard Production Verification Toolkit** helps you verify the installed runtime before release.
+
+- **14 verification groups** covering runtime behavior and documented guarantees.
+- **Structured evidence:** Markdown and JSON reports, plus JUnit XML for CI.
+- **Failure testing:** a defined corpus of failure scenarios and checks for accounting and concurrency invariants.
+- **Release verdicts:** PASS, PASS_WITH_WARNINGS, FAIL, or BLOCKED.
+
+The toolkit runs locally against the installed runtime. It does not require a cloud account, telemetry, or a runtime license key.
+
+**Price: $199 one-time.**
+
+[Get the Production Verification Toolkit](https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65)
+
 ## Documentation
 
 - [Accounting and cost semantics](docs/ACCOUNTING.md)

@@ -92,12 +92,21 @@ try {
     throw new Error('ioredis must be an optional peer dependency');
   }
 
-  // Nothing resembling a payment or license gate may ship.
-  for (const file of ['dist/esm/index.js', 'dist/esm/pro.js', 'dist/cjs/index.js', 'dist/cjs/pro.js', 'README.md']) {
+  // No shipped code may reference a payment or license gate. The published README.md is the one
+  // exception: it deliberately advertises the paid Production Verification Toolkit, so it is checked
+  // for that exact copy instead of the gate regex. The executable bundles stay strictly gated.
+  for (const file of ['dist/esm/index.js', 'dist/esm/pro.js', 'dist/cjs/index.js', 'dist/cjs/pro.js']) {
     const content = readFileSync(join(installed, file), 'utf8');
     if (/lemonsqueezy|gumroad|stripe|license[-_]?key|activation code/iu.test(content)) {
       throw new Error(`packed artifact references a payment or license gate: ${file}`);
     }
+  }
+
+  if (!installedReadme.includes('AI CostGuard Production Verification Toolkit')) {
+    throw new Error('published README.md is missing the paid toolkit name');
+  }
+  if (!installedReadme.includes('https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65')) {
+    throw new Error('published README.md is missing the paid toolkit checkout URL');
   }
 
   // --- ESM: import the public entry point and the /pro subpath --------------------------------------
