@@ -77,10 +77,256 @@ test('dashboard server exposes local summary JSON', async () => {
 });
 
 test('dashboard refuses non-loopback binding without explicit opt-in', async () => {
+  await assert.rejects(() => startDashboardServer({ host: '0.0.0.0', port: 0 }), /allowRemote/u);
+});
+
+test('dashboard refuses non-loopback binding without an auth token', async () => {
   await assert.rejects(
-    () => startDashboardServer({ host: '0.0.0.0', port: 0 }),
-    /allowRemote.*authentication/u
+    () => startDashboardServer({ host: '0.0.0.0', port: 0, allowRemote: true }),
+    /authentication/u
   );
+});
+
+test('dashboard refuses a non-loopback binding with a too-short auth token', async () => {
+  await assert.rejects(
+    () => startDashboardServer({ host: '0.0.0.0', port: 0, allowRemote: true, authToken: 'short' }),
+    /at least 16 characters/u
+  );
+});
+
+test('dashboard accepts a token of exactly the minimum length', async () => {
+  const { server } = await startDashboardServer({ port: 0, authToken: 'a'.repeat(16) });
+  try {
+    assert.ok(server.listening);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('dashboard requires the token on every request and every method once one is set', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'costguard-dashboard-auth-'));
+  const eventLogPath = join(directory, 'events.jsonl');
+  writeFileSync(eventLogPath, '', 'utf8');
+
+  const token = 'unit-test-dashboard-token-0123456789';
+  const { server, url } = await startDashboardServer({ eventLogPath, port: 0, authToken: token });
+
+  try {
+    // A browser navigation to the root is redirected to the login form, never handed a 401.
+    const root = await fetch(url, { redirect: 'manual' });
+    assert.equal(root.status, 303, 'an unauthenticated navigation is redirected, not rejected');
+    assert.equal(root.headers.get('location'), '/login');
+
+    // Everything else, on any method, gets a plain 401 for programmatic callers.
+    const anonymousJson = await fetch(`${url}/events.json`);
+    assert.equal(anonymousJson.status, 401, 'the JSON route is gated');
+
+    for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
+      const response = await fetch(url, { method });
+      assert.equal(response.status, 401, `${method} / must be gated`);
+    }
+
+    // A token in the query string must NOT authenticate: it would leak through history, logs, and
+    // the Referer header.
+    const viaQuery = await fetch(`${url}/events.json?token=${encodeURIComponent(token)}`);
+    assert.equal(viaQuery.status, 401, 'a token in the URL is ignored');
+    assert.equal(viaQuery.headers.get('set-cookie'), null, 'no cookie is issued for a URL token');
+
+    const wrong = await fetch(`${url}/events.json`, { headers: { authorization: 'Bearer a-different-token-000000000000' } });
+    assert.equal(wrong.status, 401, 'a wrong token is rejected');
+
+    const bearer = await fetch(`${url}/events.json`, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(bearer.status, 200);
+    assert.match(bearer.headers.get('cache-control') ?? '', /no-store/u, 'authenticated responses are not cached');
+    assert.equal(bearer.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(bearer.headers.get('x-content-type-options'), 'nosniff');
+
+    const headerToken = await fetch(`${url}/events.json`, { headers: { 'x-costguard-token': token } });
+    assert.equal(headerToken.status, 200);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('dashboard login exchanges a POSTed token for an HttpOnly cookie and never uses a URL', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'costguard-dashboard-login-'));
+  const eventLogPath = join(directory, 'events.jsonl');
+  writeFileSync(eventLogPath, '', 'utf8');
+
+  const token = 'login-flow-dashboard-token-0123456789';
+  const { server, url } = await startDashboardServer({ eventLogPath, port: 0, authToken: token });
+
+  try {
+    // The login form is public, posts to /login, and never renders the token.
+    const form = await fetch(`${url}/login`);
+    assert.equal(form.status, 200);
+    const html = await form.text();
+    assert.match(html, /<form method="post" action="\/login">/u);
+    assert.match(html, /type="password"/u);
+    assert.doesNotMatch(html, new RegExp(token, 'u'), 'the token is never rendered into the page');
+
+    // A non-GET/HEAD/POST method on the login endpoint is a 405, not a token check.
+    assert.equal((await fetch(`${url}/login`, { method: 'PUT' })).status, 405);
+
+    // A wrong token re-renders the form with 401, sets no cookie, and never echoes the secret.
+    const submitted = 'wrong-token-value-0000000000';
+    const bad = await fetch(`${url}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token: submitted }).toString(),
+      redirect: 'manual',
+    });
+    assert.equal(bad.status, 401);
+    assert.equal(bad.headers.get('set-cookie'), null);
+    assert.doesNotMatch(await bad.text(), new RegExp(submitted, 'u'), 'the submitted secret is not echoed');
+
+    // The correct token sets an HttpOnly, SameSite cookie and redirects to a fixed target.
+    const good = await fetch(`${url}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token }).toString(),
+      redirect: 'manual',
+    });
+    assert.equal(good.status, 303);
+    assert.equal(good.headers.get('location'), '/', 'the redirect target is fixed, not attacker-controlled');
+    const setCookie = good.headers.get('set-cookie') ?? '';
+    assert.match(setCookie, /costguard_dashboard_token=/u);
+    assert.match(setCookie, /HttpOnly/u);
+    assert.match(setCookie, /SameSite=Strict/u);
+    assert.doesNotMatch(setCookie, /;\s*Secure/u, 'the cookie is not marked Secure on plain HTTP');
+
+    const cookie = setCookie.split(';', 1)[0];
+    const authed = await fetch(`${url}/events.json`, { headers: { cookie } });
+    assert.equal(authed.status, 200, 'the login cookie authenticates later requests');
+
+    // An over-large body is rejected instead of buffered.
+    const huge = await fetch(`${url}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: `token=${'a'.repeat(5000)}`,
+      redirect: 'manual',
+    });
+    assert.equal(huge.status, 413);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('dashboard marks the login cookie Secure only when told to, never from forwarded headers', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'costguard-dashboard-secure-'));
+  const eventLogPath = join(directory, 'events.jsonl');
+  writeFileSync(eventLogPath, '', 'utf8');
+
+  const token = 'secure-cookie-dashboard-token-0123456789';
+  const logIn = (url, extraHeaders = {}) =>
+    fetch(`${url}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', ...extraHeaders },
+      body: new URLSearchParams({ token }).toString(),
+      redirect: 'manual',
+    });
+
+  const plain = await startDashboardServer({ eventLogPath, port: 0, authToken: token });
+  try {
+    const defaulted = await logIn(plain.url);
+    assert.equal(defaulted.status, 303);
+    assert.doesNotMatch(defaulted.headers.get('set-cookie') ?? '', /;\s*Secure/u, 'no Secure without opting in');
+
+    // A client can send any forwarded header; none of them may set a cookie security attribute.
+    const spoofed = await logIn(plain.url, { 'x-forwarded-proto': 'https' });
+    assert.equal(spoofed.status, 303);
+    assert.doesNotMatch(
+      spoofed.headers.get('set-cookie') ?? '',
+      /;\s*Secure/u,
+      'a forwarded header must never add Secure'
+    );
+  } finally {
+    await new Promise((resolve) => plain.server.close(resolve));
+  }
+
+  const secure = await startDashboardServer({ eventLogPath, port: 0, authToken: token, cookieSecure: true });
+  try {
+    const response = await logIn(secure.url);
+    assert.equal(response.status, 303);
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    assert.match(setCookie, /;\s*Secure/u, 'cookieSecure marks the cookie for a TLS-terminating proxy');
+    assert.match(setCookie, /HttpOnly/u);
+    assert.match(setCookie, /SameSite=Strict/u);
+  } finally {
+    await new Promise((resolve) => secure.server.close(resolve));
+  }
+});
+
+test('dashboard throttles repeated failed logins and clears the counter on success', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'costguard-dashboard-ratelimit-'));
+  const eventLogPath = join(directory, 'events.jsonl');
+  writeFileSync(eventLogPath, '', 'utf8');
+
+  const token = 'ratelimit-dashboard-token-0123456789';
+  const { server, url } = await startDashboardServer({ eventLogPath, port: 0, authToken: token });
+
+  const attempt = (value) =>
+    fetch(`${url}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token: value }).toString(),
+      redirect: 'manual',
+    });
+
+  try {
+    // A few wrong guesses below the limit are ordinary 401s.
+    for (let index = 0; index < 3; index++) {
+      assert.equal((await attempt('wrong-token-value-000000000000')).status, 401);
+    }
+
+    // A correct token still works and resets the counter.
+    assert.equal((await attempt(token)).status, 303, 'a correct token below the limit still works');
+
+    // The reset means a fresh full burst is tolerated before the limiter trips.
+    for (let index = 0; index < 10; index++) {
+      assert.equal((await attempt('wrong-token-value-000000000000')).status, 401, 'the success reset the counter');
+    }
+
+    const throttled = await attempt('wrong-token-value-000000000000');
+    assert.equal(throttled.status, 429, 'the next failed login is throttled');
+    assert.match(throttled.headers.get('retry-after') ?? '', /^\d+$/u, 'Retry-After is a whole number of seconds');
+
+    // The throttle is keyed by address, so it also refuses a correct token until the window passes.
+    assert.equal((await attempt(token)).status, 429, 'the throttle covers the whole endpoint, not one guess');
+    assert.equal(throttled.headers.get('cache-control'), 'no-store');
+
+    // Reading the form is not a guessing attempt and stays available.
+    assert.equal((await fetch(`${url}/login`)).status, 200);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('dashboard can bind remotely only with allow-remote and a valid token', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'costguard-dashboard-remote-'));
+  const eventLogPath = join(directory, 'events.jsonl');
+  writeFileSync(eventLogPath, '', 'utf8');
+
+  const token = 'remote-dashboard-token-0123456789';
+  const { server, url } = await startDashboardServer({
+    eventLogPath,
+    host: '0.0.0.0',
+    port: 0,
+    allowRemote: true,
+    authToken: token,
+  });
+
+  try {
+    assert.ok(url.startsWith('http://0.0.0.0:'), 'a non-loopback host binds as requested');
+    const base = url.replace('0.0.0.0', '127.0.0.1');
+    const anonymousJson = await fetch(`${base}/events.json`);
+    assert.equal(anonymousJson.status, 401, 'a bound remote host still requires the token');
+    const anonymousNavigation = await fetch(`${base}/`, { redirect: 'manual' });
+    assert.equal(anonymousNavigation.status, 303, 'a remote navigation is redirected to the login form');
+    assert.equal(anonymousNavigation.headers.get('location'), '/login');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('a malformed event log cannot crash the dashboard server', async () => {

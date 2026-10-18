@@ -98,7 +98,7 @@ export function parseDashboardArgs(args: readonly string[]): CliDashboardOptions
     if (!arg.startsWith('--')) continue;
 
     const key = arg.slice(2);
-    if (key === 'once' || key === 'json' || key === 'allow-remote') {
+    if (key === 'once' || key === 'json' || key === 'allow-remote' || key === 'cookie-secure') {
       flags.add(key);
       continue;
     }
@@ -118,6 +118,8 @@ export function parseDashboardArgs(args: readonly string[]): CliDashboardOptions
     host: readOptionalString(options, 'host'),
     port: readOptionalNumber(options, 'port'),
     recentLimit: readOptionalNumber(options, 'recent'),
+    authToken: readOptionalString(options, 'auth-token'),
+    cookieSecure: flags.has('cookie-secure') || undefined,
     once: flags.has('once'),
     json: flags.has('json'),
     allowRemote: flags.has('allow-remote'),
@@ -185,9 +187,20 @@ export function runCli(args: readonly string[] = process.argv.slice(2), io: CliI
         return 0;
       }
 
-      void startDashboardServer(options)
+      const authToken = options.authToken ?? readDashboardTokenFromEnv();
+      const cookieSecure = options.cookieSecure ?? readCookieSecureFromEnv();
+      const serverOptions: DashboardOptions = {
+        ...options,
+        ...(authToken === undefined ? {} : { authToken }),
+        ...(cookieSecure === undefined ? {} : { cookieSecure }),
+      };
+
+      void startDashboardServer(serverOptions)
         .then(({ url }) => {
-          io.stdout(`AI CostGuard dashboard running at ${url}\nReading events from ${options.eventLogPath}\n`);
+          const authNote = authToken === undefined ? '' : ` (sign in at ${url}/login)`;
+          io.stdout(
+            `AI CostGuard dashboard running at ${url}${authNote}\nReading events from ${options.eventLogPath}\n`
+          );
         })
         .catch((error: unknown) => {
           io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -331,13 +344,19 @@ function helpText(): string {
     '  aifw pricing --check-stale --days 30',
     '  aifw dashboard --events .ai-costguard/events.jsonl --budget <usd>',
     '  ai-costguard dashboard --once --json',
-    '  ai-costguard dashboard --host 0.0.0.0 --allow-remote',
+    '  ai-costguard dashboard --host 0.0.0.0 --allow-remote --auth-token <secret>',
     '',
     'Notes:',
     '  --tokens is per-step output tokens. Use --input-tokens for input token estimates.',
     '  For custom models, pass --input-price-per-1k and --output-price-per-1k.',
     '  The dashboard is local-only and reads an opt-in JSONL event log.',
-    '  Non-loopback dashboard binding requires --allow-remote and has no authentication.',
+    '  Non-loopback binding requires --allow-remote and an auth token of at least 16 characters.',
+    '  Remote access must use an encrypted transport (a TLS reverse proxy or an SSH tunnel); the',
+    '  dashboard itself is plain HTTP. Add --cookie-secure (or COSTGUARD_DASHBOARD_COOKIE_SECURE=1)',
+    '  when TLS is terminated in front of it, so the login cookie is marked Secure.',
+    '  Prefer COSTGUARD_DASHBOARD_TOKEN over --auth-token: a command-line secret is visible in shell',
+    '  history and the process list. Browsers sign in at /login (the token is never put in a URL);',
+    '  scripts may send it as an Authorization: Bearer or X-CostGuard-Token header.',
     '  Exit code 0 means projected cost is within budget; 1 means over budget; 2 means usage/config error.',
     '',
   ].join('\n');
@@ -353,6 +372,31 @@ function getPricingAgeDays(lastUpdated: string): number {
 function readOptionalString(options: Map<string, string>, key: string): string | undefined {
   const value = options.get(key);
   return value?.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Reads the dashboard token from the environment.
+ *
+ * Preferring an environment variable over the command line keeps the secret out of shell history and
+ * the process list on shared machines.
+ */
+function readDashboardTokenFromEnv(): string | undefined {
+  const value = process.env.COSTGUARD_DASHBOARD_TOKEN;
+  return value?.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Reads the dashboard `Secure`-cookie flag from the environment.
+ *
+ * Set this when the dashboard is served over HTTPS, including TLS terminated by a reverse proxy. It
+ * is opt-in because forwarded headers are not trusted to decide a cookie's security attribute.
+ */
+function readCookieSecureFromEnv(): boolean | undefined {
+  const value = process.env.COSTGUARD_DASHBOARD_COOKIE_SECURE?.trim().toLowerCase();
+  if (!value) return undefined;
+  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
+  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
+  return undefined;
 }
 
 function isCliEntry(): boolean {

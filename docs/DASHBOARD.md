@@ -14,7 +14,61 @@ const openai = guard(client, {
 });
 ```
 
-The server binds to `127.0.0.1` by default. Non-loopback binding is refused unless the caller explicitly opts in with `allowRemote: true` or the CLI `--allow-remote` flag. The dashboard has no authentication, so do not expose it to an untrusted network.
+The server binds to `127.0.0.1` by default and needs no configuration for local use. The dashboard shows
+your event log, so any binding beyond loopback is both opt-in and authenticated:
+
+- Non-loopback binding is refused unless the caller passes `allowRemote: true` (CLI `--allow-remote`).
+- Non-loopback binding is refused **without an auth token**. The token must be at least 16 characters.
+- On loopback, setting a token also turns authentication on; without one, localhost stays open.
+
+Supply the token with the `COSTGUARD_DASHBOARD_TOKEN` environment variable (preferred),
+`authToken: '<secret>'` (API), or `--auth-token <secret>` (CLI). Prefer the environment variable: a
+command-line flag is visible in shell history and the process list on shared machines.
+
+The token is **never accepted in a URL.** A query string is written to browser history, sent to other
+origins in the `Referer` header, and recorded by every proxy and access log along the way, so a
+`?token=` login would leak the secret. Instead:
+
+- **Browsers** sign in at `/login`, a public page whose form POSTs the token in the request body. On
+  success the server sets an `HttpOnly`, `SameSite=Strict` cookie and redirects to `/`. The secret
+  never appears in a URL, a redirect target, or the page itself. Repeated wrong guesses from one
+  connection are throttled (`429` with `Retry-After`) so the shared secret cannot be brute-forced
+  without bound.
+- **Scripts and `curl`** send the token as `Authorization: Bearer <token>` or an
+  `X-CostGuard-Token: <token>` header.
+
+Every response carries `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and
+`X-Content-Type-Options: nosniff`.
+
+### Remote access requires an encrypted transport
+
+The dashboard speaks **plain HTTP**. Serving it beyond loopback is only supported behind an encrypted
+transport — a TLS-terminating reverse proxy or an SSH port-forward. Without TLS the token and the
+login cookie cross the network in cleartext, so remote HTTP access is not secure and is not supported.
+
+When TLS is terminated in front of the dashboard, add the `Secure` attribute to the login cookie with
+`--cookie-secure` (or `COSTGUARD_DASHBOARD_COOKIE_SECURE=1`). The flag is opt-in on purpose: the
+dashboard does **not** read `X-Forwarded-Proto` or any other forwarded header to decide this, because
+any client can send those headers. The cookie is marked `Secure` automatically only when the request
+itself arrived over TLS, which does not happen for this plain-HTTP server. (Without `Secure`, a browser
+may still send the cookie over a downgraded HTTP request.)
+
+The login throttle is keyed by the connection's remote address, never by a forwarded client-IP header.
+Behind a reverse proxy that means every client shares the proxy's address and one bucket; that is a
+deliberate trade-off, since trusting a forwarded IP would let an attacker forge it.
+
+```bash
+# Local, no token needed
+ai-costguard dashboard --events .ai-costguard/events.jsonl --budget 5
+
+# Remote, token required; terminate TLS in front, then sign in at https://<host>:<port>/login
+export COSTGUARD_DASHBOARD_TOKEN="$(openssl rand -hex 24)"
+export COSTGUARD_DASHBOARD_COOKIE_SECURE=1
+ai-costguard dashboard --events .ai-costguard/events.jsonl --host 0.0.0.0 --allow-remote
+
+# Script access with a header instead of the cookie
+curl -H "Authorization: Bearer $COSTGUARD_DASHBOARD_TOKEN" http://127.0.0.1:4318/events.json
+```
 
 Start the dashboard:
 

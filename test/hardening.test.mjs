@@ -339,6 +339,27 @@ test('event logging keeps writing after its directory is removed underneath it',
   }
 });
 
+test('history expiry never refunds a scope reservation', async () => {
+  // `historyTtlMs` prunes loop/retry history and stamps `sessionExpiresAt`, but it must never touch
+  // the budget balance. If an expired history reset `reservedCost`, a caller could regain its budget
+  // simply by waiting, which would turn the guard into an unlimited one.
+  const body = request('a reservation must survive history expiry');
+  const budget = costOf(body);
+  const core = new GuardCore({ budget, historyTtlMs: 1 });
+  const call = () => core.extractContext([body]);
+
+  core.check(call());
+  const reserved = core.getState().scopes[call().scopeKey].reservedCost;
+  assert.ok(reserved > 0, 'the first request reserves budget');
+
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assertBudgetBlocked(() => core.check(call()), 'history expiry must not hand the budget back');
+
+  const scope = core.getState().scopes[call().scopeKey];
+  assert.equal(scope.reservedCost, reserved, 'the reservation survives pruning');
+  assert.equal((scope.recentPrompts ?? []).length, 0, 'the prompt history did expire');
+});
+
 test('the event log never records a prompt or an identity', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'aicg-log-redact-'));
   const logPath = path.join(dir, 'events.jsonl');

@@ -239,9 +239,41 @@ test('CLI parses dashboard arguments', () => {
     host: undefined,
     port: undefined,
     recentLimit: undefined,
+    authToken: undefined,
+    cookieSecure: undefined,
     allowRemote: false,
     once: true,
     json: true,
+  });
+});
+
+test('CLI parses a dashboard auth token', () => {
+  assert.deepEqual(parseDashboardArgs(['--host', '0.0.0.0', '--allow-remote', '--auth-token', 'a-secret-value-123']), {
+    eventLogPath: '.ai-costguard/events.jsonl',
+    budgetUsd: undefined,
+    host: '0.0.0.0',
+    port: undefined,
+    recentLimit: undefined,
+    authToken: 'a-secret-value-123',
+    cookieSecure: undefined,
+    allowRemote: true,
+    once: false,
+    json: false,
+  });
+});
+
+test('CLI parses the dashboard cookie-secure flag', () => {
+  assert.deepEqual(parseDashboardArgs(['--host', '0.0.0.0', '--allow-remote', '--cookie-secure']), {
+    eventLogPath: '.ai-costguard/events.jsonl',
+    budgetUsd: undefined,
+    host: '0.0.0.0',
+    port: undefined,
+    recentLimit: undefined,
+    authToken: undefined,
+    cookieSecure: true,
+    allowRemote: true,
+    once: false,
+    json: false,
   });
 });
 

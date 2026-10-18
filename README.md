@@ -75,24 +75,10 @@ The example configures a **$5 estimated-cost budget** for the selected scope. Se
 
 ## Try It Without API Costs
 
-
 The deterministic mock demo proves the guard blocks a request **before** the provider method runs,
 using a fake provider. Downloading or installing the package requires network access, but the mock
 demo itself needs no provider credentials, makes no paid API call, and makes no network request.
-## Production Verification
 
-Already using AI CostGuard in production? The free runtime protects your application before selected AI provider calls. The paid **AI CostGuard Production Verification Toolkit** helps you verify the installed runtime before release.
-
-- **14 verification groups** covering runtime behavior and documented guarantees.
-- **Structured evidence:** Markdown and JSON reports, plus JUnit XML for CI.
-- **Failure testing:** a defined corpus of failure scenarios and checks for accounting and concurrency invariants.
-- **Release verdicts:** PASS, PASS_WITH_WARNINGS, FAIL, or BLOCKED.
-
-The toolkit runs locally against the installed runtime. It does not require a cloud account, telemetry, or a runtime license key.
-
-**Price: $199 one-time.**
-
-[Get the Production Verification Toolkit](https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65)
 **If you installed from npm:**
 
 ```bash
@@ -119,6 +105,36 @@ Blocked provider calls: 1
 ```
 
 The third request is blocked before the mock provider method executes.
+
+## What the Budget Actually Enforces
+
+AI CostGuard enforces a budget against a **pre-call estimate**, not a provider invoice. Read this
+before trusting any number the guard reports.
+
+- **Estimates, not bills.** The budget test compares estimated reserved cost. Provider-reported
+  usage never changes a decision and never refunds a reservation. Treat the budget as a ceiling on
+  estimated spend and `actualCost` as the reconciliation signal.
+- **Output tokens are required, not guessed.** A guarded request must carry an output limit
+  (`max_tokens`, `max_completion_tokens`, `maxTokens`, or `max_output_tokens`) or the guard config
+  must set `defaultOutputTokens`. A request with neither is blocked with `OUTPUT_LIMIT_REQUIRED`
+  rather than allowed uncosted.
+- **Input tokens are approximate.** The built-in estimator is a dependency-free heuristic calibrated
+  for ordinary prose and deliberately rounds against you. It does not understand code, base64, or
+  non-Latin scripts, so estimates can be off in either direction. Register an exact tokenizer with
+  `registerTokenizer()` when the number has to be tight; the guard warns once per model and scope
+  when it falls back to the approximation.
+- **Pricing is a static snapshot, not a live feed.** Nothing in this package fetches prices. Every
+  built-in entry carries a `lastUpdated` date, and the package warns once at import when any entry is
+  older than 30 days. Check freshness in CI with `npx ai-costguard pricing --check-stale` (exit 1 when
+  stale), verify the models you rely on, and override any that changed.
+- **Reservations are never refunded.** The decision happens before the provider call, and a failed
+  provider call can still have done billable work, so a reservation stands even when the call throws.
+  A retry is a second reservation, which is why retry storms are detected and blocked separately.
+- **Budgets bind per scope, per process.** `budget` is enforced for each scope
+  (`project`/`user`/`session`/`run`). Separate processes do not share a balance unless you use the
+  Redis-backed shared-budget `/pro` path.
+
+See [docs/ACCOUNTING.md](docs/ACCOUNTING.md) for the full money model.
 
 ## Coverage
 
@@ -180,18 +196,24 @@ AI CostGuard is a **pre-call cost estimator, not a billing ledger or an exact-co
 
 Some model names may resolve to a built-in model-family pricing entry instead of an exact model entry. Verify production pricing before relying on estimates.
 
-## Production Verification
+## Free Runtime vs. Paid Toolkit
 
-Already using AI CostGuard in production? The free runtime protects your application before selected AI provider calls. The paid **AI CostGuard Production Verification Toolkit** helps you verify the installed runtime before release.
+The runtime in this repository is the whole product and it is **free and MIT licensed** — no paid
+tier, no API key, no account, no telemetry, and no runtime license check. Installation, the quick
+start, the CLI, the dashboard, and the Redis `/pro` shared budget all ship in the free package.
+
+The only paid item is an **optional, separate** add-on you are never required to buy:
+
+### AI CostGuard Production Verification Toolkit — $199 one-time
+
+A local verification harness that runs against the free runtime you already installed:
 
 - **14 verification groups** covering runtime behavior and documented guarantees.
 - **Structured evidence:** Markdown and JSON reports, plus JUnit XML for CI.
 - **Failure testing:** a defined corpus of failure scenarios and checks for accounting and concurrency invariants.
 - **Release verdicts:** PASS, PASS_WITH_WARNINGS, FAIL, or BLOCKED.
 
-The toolkit runs locally against the installed runtime. It does not require a cloud account, telemetry, or a runtime license key.
-
-**Price: $199 one-time.**
+It runs locally, makes no network calls, and needs no cloud account, telemetry, or license key.
 
 [Get the Production Verification Toolkit](https://aicostguard.lemonsqueezy.com/checkout/buy/8801cd1c-d7ea-4df8-a2e7-e54565f32e65)
 

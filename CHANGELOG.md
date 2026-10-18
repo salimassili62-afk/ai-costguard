@@ -2,14 +2,55 @@
 
 ## [Unreleased]
 
+## [2.3.4] - 2026-10-18
+
+Security patch for the local dashboard. No accounting, public-API, or dependency changes; the exported
+runtime surface is unchanged from 2.3.3.
+
+### Fixed
+
+- **The dashboard no longer accepts the auth token in the URL.** Login previously honored a
+  `?token=<secret>` query parameter. A URL is written to browser history, forwarded to other origins in
+  the `Referer` header, and recorded by every proxy and access log on the way, so the shared secret
+  could leak without the attacker ever reaching the server. Query-string tokens are now ignored.
+- Unauthenticated dashboard access now redirects browser navigations to a public login page and returns
+  `401` to everything else, instead of serving the summary. The login redirect target is a fixed
+  constant, so it cannot be used as an open redirect.
+
+### Added
+
+- Dashboard authentication: an `authToken` option, the `--auth-token` CLI flag, and the
+  `COSTGUARD_DASHBOARD_TOKEN` environment variable. A non-loopback bind now requires a token of at
+  least 16 characters; on loopback, setting a token turns authentication on.
+- Browser login at `POST /login`, which carries the token in the request body and exchanges it for an
+  `HttpOnly`, `SameSite=Strict` cookie; scripts may send `Authorization: Bearer <token>` or
+  `X-CostGuard-Token`.
+- `cookieSecure` option, `--cookie-secure` flag, and `COSTGUARD_DASHBOARD_COOKIE_SECURE` environment
+  variable to mark the login cookie `Secure` when TLS is terminated in front of the dashboard.
+  Forwarded headers such as `X-Forwarded-Proto` are never trusted to set a cookie attribute.
+- Bounded, dependency-free login throttling: repeated failed logins from one remote address return
+  `429` with `Retry-After`. Buckets are keyed by the connection's own address (never a forwarded IP
+  header) and the map is pruned and capped.
+- `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff` on every dashboard response.
+- Regression tests for the login flow, per-method auth gating, URL-token rejection, the `Secure` cookie
+  policy, login throttling, and dashboard CLI argument parsing.
+
 ### Documentation
 
-- Added a "Production Verification" section to `README.md` describing the separate, optional paid **AI CostGuard Production Verification Toolkit** (`$199`, one-time) and linking to its hosted checkout. The MIT-licensed runtime remains free and ungated: no license key, activation, or feature gate is introduced into the library.
-- Reconciled the paid-product wording in `START-HERE.md` and the landing license page so the free runtime and the separate paid toolkit are described distinctly rather than as mutually exclusive claims.
+- `docs/DASHBOARD.md` documents the login flow and states that remote access requires an encrypted
+  transport (a TLS reverse proxy or an SSH tunnel).
+- `docs/ACCOUNTING.md` documents scope lifetime and per-scope budget enforcement.
+- `README.md` gains a "What the Budget Actually Enforces" section and consolidates the free-runtime
+  versus paid-toolkit wording. The optional paid **AI CostGuard Production Verification Toolkit**
+  (`$199`, one-time) is described as separate from the free, ungated MIT runtime, and no license key,
+  activation, or feature gate is introduced into the library. Paid-product wording in `START-HERE.md`
+  was reconciled to match.
 
 ### Changed
 
-- `test/smoke-examples.mjs` and `scripts/package-smoke.js` now permit the root `README.md` to carry the paid toolkit's name and checkout URL, while every other document and every shipped executable bundle keeps the existing paid-copy prohibitions.
+- `test/smoke-examples.mjs` and `scripts/package-smoke.js` permit the root `README.md` to carry the
+  paid toolkit's name and checkout URL, while every other document and every shipped executable bundle
+  keeps the existing paid-copy prohibitions.
 
 ## [2.3.3] - 2026-10-13
 

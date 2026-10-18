@@ -317,6 +317,33 @@ registerPricing([
 Runtime entries take precedence over the built-in table for both exact and prefix matches, so
 registering the price is enough to close the gap.
 
+## Scope lifetime and budgets
+
+`budget` is enforced **per scope**, not per process. A scope is the combination of
+`projectId`/`userId`/`sessionId`/`runId` a request carries, or the implicit `default` scope. The
+process-wide counters (`guard.getGuardState()`) are reporting only and are **never** consulted to
+allow or block.
+
+Scope creation and expiry cannot hand out an unbounded budget by accident, for two reasons:
+
+- **Durable identities are never reclaimed.** A scope identified by `projectId` or `userId` keeps its
+  accumulated `reservedCost` for the life of the process. The `default` scope is never reclaimed
+  either.
+- **Short-lived scopes are only reclaimed on an explicit, idle TTL.** Reclamation happens only when
+  `scopeIdleTtlMs` is configured, only for scopes identified purely by `sessionId`/`runId`, and only
+  once they have been idle longer than the TTL. `historyTtlMs` prunes loop/retry history but never
+  touches `reservedCost` or `sessionExpiresAt`-adjacent budget state.
+
+The one documented cost of `scopeIdleTtlMs`: because reclamation deletes a scope's accumulated
+spend, a caller that continuously introduces **new** `sessionId`/`runId` values can spend more than
+`budget` in total (each newly arriving scope at a full map can sweep idle scopes). A **fixed**
+population of identifiers that recycles among itself is bounded to `budget` per identifier per TTL
+window. This is a property of the caller's scope identifiers, not a bug in the guard.
+
+If you need a hard process-wide ceiling, scope by `projectId`/`userId` (never reclaimed) or use the
+shared-budget `GuardPro` path, where the total lives in Redis and reclamation does not apply. See
+[SHARED-BUDGET.md](SHARED-BUDGET.md).
+
 ## See also
 
 - [COVERAGE.md](COVERAGE.md) — which calls are costed at all
