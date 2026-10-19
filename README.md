@@ -5,33 +5,31 @@
 
 **A pre-call spend firewall for Node.js AI agents.**
 
-AI CostGuard estimates the cost of selected AI model calls and blocks requests that exceed your configured budget or execution limits **before the provider method is called**.
+AI CostGuard estimates the cost of selected AI model calls and blocks requests that exceed your
+budget or execution limits **before the provider method is called**.
 
-- **Free and open source:** complete runtime under the MIT license.
+- **Free and open source:** the complete runtime, MIT licensed.
 - **Local-first:** runs inside your Node.js process.
-- **No guard API key or cloud account required.**
+- **No API key, cloud account, or telemetry required.**
 - **Built for control:** budgets, retry storms, repeated prompts, and execution limits.
 
 [Install from npm](https://www.npmjs.com/package/@salimassili/ai-costguard) · [Quick Start](#quick-start) · [Documentation](#documentation)
 
 ## Why AI CostGuard?
 
-AI agents can waste tokens and money through repeated prompts, retry storms, excessive steps, and concurrent calls.
-
-AI CostGuard adds a cost and execution check before selected SDK methods run.
+AI agents waste tokens and money through repeated prompts, retry storms, excessive steps, and
+concurrent calls. Add one check before selected SDK methods run:
 
 - Enforce estimated-cost budgets.
 - Limit execution with `maxSteps`.
 - Detect repeated-prompt loops and retry storms.
 - Reject calls when required pricing or output limits are unavailable.
 - Reserve budget atomically for concurrent calls within one process.
-- Emit structured errors and optional local events and webhook alerts.
+- Emit structured errors plus optional local events and webhook alerts.
 
 ## Quick Start
 
-**Requirements:** Node.js 18 or later.
-
-Install:
+**Requires Node.js 18 or later.**
 
 ```bash
 npm install @salimassili/ai-costguard
@@ -55,9 +53,7 @@ const openai = guard(
 try {
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
-    messages: [
-      { role: 'user', content: 'Write a short summary.' },
-    ],
+    messages: [{ role: 'user', content: 'Write a short summary.' }],
     max_tokens: 200,
   });
 
@@ -71,18 +67,18 @@ try {
 }
 ```
 
-The example configures a **$5 estimated-cost budget** for the selected scope. Set `OPENAI_API_KEY` in your environment before making a real provider call.
+This configures a **$5 estimated-cost budget** for the selected scope. Set `OPENAI_API_KEY` before
+making a real provider call.
 
 ## Try It Without API Costs
 
 The deterministic mock demo proves the guard blocks a request **before** the provider method runs,
-using a fake provider. Downloading or installing the package requires network access, but the mock
-demo itself needs no provider credentials, makes no paid API call, and makes no network request.
+using a fake provider. It needs no provider credentials, makes no paid API call, and makes no
+network request.
 
 **If you installed from npm:**
 
 ```bash
-npm install @salimassili/ai-costguard
 node node_modules/@salimassili/ai-costguard/examples/integrations/quick-demo.mjs
 ```
 
@@ -115,9 +111,9 @@ before trusting any number the guard reports.
   usage never changes a decision and never refunds a reservation. Treat the budget as a ceiling on
   estimated spend and `actualCost` as the reconciliation signal.
 - **Output tokens are required, not guessed.** A guarded request must carry an output limit
-  (`max_tokens`, `max_completion_tokens`, `maxTokens`, or `max_output_tokens`) or the guard config
-  must set `defaultOutputTokens`. A request with neither is blocked with `OUTPUT_LIMIT_REQUIRED`
-  rather than allowed uncosted.
+  (`max_tokens`, `max_completion_tokens`, `maxTokens`, or `max_output_tokens`), or the config must
+  set `defaultOutputTokens`. A request with neither is blocked with `OUTPUT_LIMIT_REQUIRED` rather
+  than allowed uncosted.
 - **Input tokens are approximate.** The built-in estimator is a dependency-free heuristic calibrated
   for ordinary prose and deliberately rounds against you. It does not understand code, base64, or
   non-Latin scripts, so estimates can be off in either direction. Register an exact tokenizer with
@@ -125,11 +121,11 @@ before trusting any number the guard reports.
   when it falls back to the approximation.
 - **Pricing is a static snapshot, not a live feed.** Nothing in this package fetches prices. Every
   built-in entry carries a `lastUpdated` date, and the package warns once at import when any entry is
-  older than 30 days. Check freshness in CI with `npx ai-costguard pricing --check-stale` (exit 1 when
-  stale), verify the models you rely on, and override any that changed.
+  older than 30 days. Check freshness in CI with `npx ai-costguard pricing --check-stale` (exit 1
+  when stale), verify the models you rely on, and override any that changed.
 - **Reservations are never refunded.** The decision happens before the provider call, and a failed
-  provider call can still have done billable work, so a reservation stands even when the call throws.
-  A retry is a second reservation, which is why retry storms are detected and blocked separately.
+  call can still have done billable work, so a reservation stands even when the call throws. A retry
+  is a second reservation, which is why retry storms are detected and blocked separately.
 - **Budgets bind per scope, per process.** `budget` is enforced for each scope
   (`project`/`user`/`session`/`run`). Separate processes do not share a balance unless you use the
   Redis-backed shared-budget `/pro` path.
@@ -145,9 +141,8 @@ By default, AI CostGuard guards these SDK method paths:
 - `responses.create`
 - `messages.create`
 
-It can also wrap custom methods and function-style SDK integrations. Other methods pass through untouched unless explicitly configured.
-
-Example with a custom client:
+It can also wrap custom methods and function-style SDK integrations. Other methods pass through
+untouched unless explicitly configured.
 
 ```ts
 const client = guard(customClient, {
@@ -156,7 +151,7 @@ const client = guard(customClient, {
 });
 ```
 
-See [Coverage](docs/COVERAGE.md) for the precise list of guarded and unguarded methods.
+See [docs/COVERAGE.md](docs/COVERAGE.md) for the precise list of guarded and unguarded methods.
 
 ## Errors
 
@@ -178,39 +173,47 @@ A blocked call throws a `GuardError` **before** the provider method runs. Branch
 | `SHARED_BUDGET_UNAVAILABLE` | Shared-budget (`/pro`) store unreachable. Fails closed. |
 
 Every `GuardError` also exposes `error.metadata` with `scopeKey`, `model`, `estimatedCostUsd`,
-`budgetLimitUsd`, `reservedCostUsd`, and `remainingUsd`. What each block decision means is detailed in
-[docs/COVERAGE.md](docs/COVERAGE.md) and [docs/ACCOUNTING.md](docs/ACCOUNTING.md).
+`budgetLimitUsd`, `reservedCostUsd`, and `remainingUsd`. The details behind each block decision live
+in [docs/COVERAGE.md](docs/COVERAGE.md) and [docs/ACCOUNTING.md](docs/ACCOUNTING.md).
 
 ## Important Limitations
 
 AI CostGuard is a **pre-call cost estimator, not a billing ledger or an exact-cost guarantee**.
 
-- **Estimated costs:** budget decisions use estimated costs reserved before a call. Provider-reported usage does not refund those reservations.
-- **Pricing freshness:** built-in pricing is a maintained snapshot, not a live provider feed. Verify prices and override them when necessary.
-- **Token estimation:** token counts can be approximate. Register a provider tokenizer when tighter estimates matter.
+- **Estimated costs:** budget decisions use estimated costs reserved before a call. Provider-reported
+  usage does not refund those reservations.
+- **Pricing freshness:** built-in pricing is a maintained snapshot, not a live provider feed. Verify
+  prices and override them when necessary.
+- **Token estimation:** token counts can be approximate. Register a provider tokenizer when tighter
+  estimates matter.
 - **Process-local budgets:** independent processes and workers do not automatically share one budget.
 - **Explicit coverage:** raw `fetch`, unwrapped clients, and unlisted methods are not intercepted.
-- **Streaming:** requests with `stream: true` are rejected rather than guarded using an unknown final token count.
+- **Streaming:** requests with `stream: true` are rejected rather than guarded using an unknown final
+  token count.
 - **Heuristic detection:** loop and retry detection can produce false positives or false negatives.
-- **Not a security boundary:** AI CostGuard does not protect API keys, reconcile invoices, or replace provider billing alerts.
+- **Not a security boundary:** AI CostGuard does not protect API keys, reconcile invoices, or replace
+  provider billing alerts.
 
-Some model names may resolve to a built-in model-family pricing entry instead of an exact model entry. Verify production pricing before relying on estimates.
+Some model names may resolve to a built-in model-family pricing entry instead of an exact model entry.
+Verify production pricing before relying on estimates.
 
 ## Free Runtime vs. Paid Toolkit
 
-The runtime in this repository is the whole product and it is **free and MIT licensed** — no paid
-tier, no API key, no account, no telemetry, and no runtime license check. Installation, the quick
-start, the CLI, the dashboard, and the Redis `/pro` shared budget all ship in the free package.
+The runtime in this repository is the whole product, and it is **free and MIT licensed**: no paid
+tier, no API key, no account, no telemetry, and no runtime license check. The quick start, the CLI,
+the dashboard, and the Redis `/pro` shared budget all ship in the free package.
 
-The only paid item is an **optional, separate** add-on you are never required to buy:
+The only paid item is an **optional, separate** add-on you are never required to buy.
 
-### AI CostGuard Production Verification Toolkit — $199 one-time
+### Production Verification
 
-A local verification harness that runs against the free runtime you already installed:
+**AI CostGuard Production Verification Toolkit — $49 one-time.** A local verification harness that
+runs against the free runtime you already installed:
 
 - **14 verification groups** covering runtime behavior and documented guarantees.
 - **Structured evidence:** Markdown and JSON reports, plus JUnit XML for CI.
-- **Failure testing:** a defined corpus of failure scenarios and checks for accounting and concurrency invariants.
+- **Failure testing:** a defined corpus of failure scenarios and checks for accounting and
+  concurrency invariants.
 - **Release verdicts:** PASS, PASS_WITH_WARNINGS, FAIL, or BLOCKED.
 
 It runs locally, makes no network calls, and needs no cloud account, telemetry, or license key.
@@ -243,4 +246,3 @@ npm run smoke
 ## License
 
 MIT. See [LICENSE](LICENSE).
-

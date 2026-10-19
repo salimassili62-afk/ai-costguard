@@ -296,7 +296,7 @@ for (const file of ['README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'ARCHITECTURE
     // The README now quotes the Production Verification Toolkit's one-time price, so the generic
     // price prohibition is replaced here by an exact assertion of that price. Every other document
     // must still avoid quoting a price.
-    assert.match(content, /\$199 one-time/u, 'README.md is missing the documented toolkit price');
+    assert.match(content, /\$49 one-time/u, 'README.md is missing the documented toolkit price');
   } else {
     assert.doesNotMatch(content, /\$\d+\s*(?:\/|per\s*)?(?:mo|month|year|one[- ]time)/iu, `${file} quotes a price`);
   }

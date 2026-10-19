@@ -1380,11 +1380,6 @@ function sanitizeMoney(value: unknown): number {
   return value;
 }
 
-function sanitizeCount(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
-  return Math.trunc(value);
-}
-
 /**
  * Rounds a USD amount to micro-cent precision (1e-6 USD).
  *

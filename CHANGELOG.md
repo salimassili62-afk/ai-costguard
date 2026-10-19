@@ -1,6 +1,26 @@
 # Changelog
 
-## [Unreleased]
+## [2.3.5] - 2026-10-19
+
+Documentation and release-metadata release. No runtime, public-API, or dependency changes; the free
+MIT runtime and the exported surface are unchanged from 2.3.4.
+
+### Documentation
+
+- Rewrote `README.md` for clarity and corrected the optional **AI CostGuard Production Verification
+  Toolkit** price from `$199` to `$49` one-time; the assertion in `test/smoke-examples.mjs` now checks
+  for `$49 one-time`.
+- Added a `Production Verification` heading to `README.md` so the `README.md#production-verification`
+  link from `START-HERE.md` resolves.
+- Fixed documentation that had drifted from the code: `docs/DASHBOARD.md` no longer claims one
+  `mkdirSync` per logged event or a full re-parse of the log on every request (directories are cached
+  per process and parsed events are reused while the file is unchanged), and `docs/SHARED-BUDGET.md`
+  now shows `windowSeconds` as a top-level `GuardPro` option rather than inside `budget`.
+
+### Changed
+
+- Removed an unused internal helper (`sanitizeCount`) from `src/core/GuardCore.ts`. It was not exported
+  and not referenced anywhere, so there is no behavioral or public-API change.
 
 ## [2.3.4] - 2026-10-18
 

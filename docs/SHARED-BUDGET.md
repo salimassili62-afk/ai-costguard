@@ -58,7 +58,8 @@ import { GuardPro } from '@salimassili/ai-costguard/pro';
 
 const pro = new GuardPro({
   redisUrl: process.env.REDIS_URL!,
-  budget: { maxUsd: 25, windowSeconds: 86_400 },
+  budget: 25,
+  windowSeconds: 86_400,
 });
 
 await pro.checkAndCharge('tenant-abc', 0.0042);
